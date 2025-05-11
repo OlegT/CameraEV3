@@ -1,0 +1,147 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:configChanges="orientation|screenSize|keyboardHidden"
+    android:orientation="vertical"
+    android:padding="0dp"
+    android:screenOrientation="portrait"
+    tools:ignore="DiscouragedApi">
+
+        <FrameLayout
+            android:id="@+id/previewContainer"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content">
+
+            <TextureView
+                android:id="@+id/textureView"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent" />
+
+            <info.ev3.cameraev3.OverlayView
+                android:id="@+id/overlayView"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:background="@android:color/transparent" />
+        </FrameLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/startButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="START"
+                android:textColor="@color/white" />
+
+            <Spinner
+                android:id="@+id/cameraSpinner"
+                style="?android:attr/spinnerStyle"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:layout_weight="1"
+                android:spinnerMode="dropdown" />
+
+            <CheckBox
+                android:id="@+id/flashCheckbox"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:text="Flash"/>
+
+        </LinearLayout>
+
+        <!-- Добавленные ползунки -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:layout_marginTop="8dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:baselineAligned="true"
+            android:orientation="horizontal"
+            android:padding="0dp"
+            android:textAlignment="center">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="18dp"
+                android:layout_marginTop="0dp"
+                android:text=" trans:"
+                android:textAlignment="center"
+                android:textSize="14sp" />
+
+            <SeekBar
+                android:id="@+id/transparencySeekBar"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:max="255"
+                android:paddingTop="7dp"
+                android:textAlignment="center" />
+
+            <EditText
+                android:id="@+id/transparencyValue"
+                android:layout_width="30dp"
+                android:layout_height="wrap_content"
+                android:inputType="number"
+                android:maxLength="3"
+                android:textAlignment="center"
+                android:textSize="10dp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:baselineAligned="true"
+            android:orientation="horizontal"
+            android:padding="0dp"
+            android:textAlignment="center">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="18dp"
+                android:layout_marginTop="0dp"
+                android:textAlignment="center"
+                android:text=" thres:"
+                android:textSize="14sp"/>
+
+            <SeekBar
+                android:id="@+id/thresholdSeekBar"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:paddingTop="7dp"
+                android:max="255"/>
+
+            <EditText
+                android:id="@+id/thresholdValue"
+                android:layout_width="30dp"
+                android:layout_height="wrap_content"
+                android:inputType="number"
+                android:maxLength="3"
+                android:textAlignment="center"
+                android:textSize="10dp"/>
+        </LinearLayout>
+    </LinearLayout>
+
+    <EditText
+        android:id="@+id/logOutput"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:background="@android:drawable/edit_text"
+        android:gravity="top"
+        android:inputType="textMultiLine"
+        android:lines="5" />
+</LinearLayout>
