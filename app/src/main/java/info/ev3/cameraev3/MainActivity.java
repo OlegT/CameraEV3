@@ -1,5 +1,6 @@
 package info.ev3.cameraev3;
 import android.Manifest;
+import android.bluetooth.BluetoothSocket;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.ImageFormat;
@@ -11,10 +12,13 @@ import android.hardware.camera2.CameraDevice;
 import android.hardware.camera2.CameraManager;
 import android.hardware.camera2.CaptureRequest;
 import android.hardware.camera2.params.StreamConfigurationMap;
+import android.os.Build;
 import android.os.Bundle;
+import android.os.Looper;
 import android.text.Editable;
 import android.text.TextWatcher;
 import android.util.DisplayMetrics;
+import android.util.Log;
 import android.util.Size;
 import android.view.Surface;
 import android.view.TextureView;
@@ -33,6 +37,10 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedList;
@@ -44,11 +52,20 @@ import android.os.Handler;
 import android.os.HandlerThread;
 import java.nio.ByteBuffer;
 import java.util.Queue;
+import java.util.Set;
+import java.util.UUID;
 
 import android.widget.SeekBar;
 import android.widget.Toast;
 
+import android.bluetooth.BluetoothAdapter;
+import android.bluetooth.BluetoothDevice;
+import android.content.Intent;
+import androidx.appcompat.app.AlertDialog;
+
 public class MainActivity extends AppCompatActivity implements TextureView.SurfaceTextureListener {
+    private static final String TAG = "EV3Controller";
+    private static final UUID EV3_UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB");
     private static final int REQUEST_CAMERA_PERMISSION = 200;
     private TextureView textureView;
     private OverlayView overlayView;
@@ -69,7 +86,6 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
     private float scaleY = 1.0f;
     private float scale1 = 1.0f;
     private float scale2 = 1.0f;
-
     private static final int BINARIZATION_THRESHOLD = 128; // Порог яркости (0-255)
     private Bitmap overlayBitmap;
     private SeekBar transparencySeekBar;
@@ -79,6 +95,19 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
     private CheckBox flashCheckbox;
     private boolean isFlashSupported = false;
     private volatile int binarizationThreshold = 128;
+    private static final int REQUEST_ENABLE_BT = 1;
+    private static final int REQUEST_BLUETOOTH_PERMISSIONS = 201;
+    private BluetoothAdapter bluetoothAdapter;
+    private BluetoothSocket socket;
+    private OutputStream outputStream;
+    private InputStream inputStream;
+    private ArrayAdapter<String> devicesAdapter;
+    private ArrayList<BluetoothDevice> ev3Devices = new ArrayList<>();
+    private BluetoothDevice selectedDevice;
+    private Button connectButton;
+    private boolean isConnected = false;
+    private boolean isSTART = false;
+    private boolean isFirst = true;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -98,6 +127,15 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         cameraSpinner = findViewById(R.id.cameraSpinner);
         logOutput = findViewById(R.id.logOutput);
         flashCheckbox = findViewById(R.id.flashCheckbox);
+        connectButton = findViewById(R.id.connectButton);
+        connectButton.setOnClickListener(v -> showBluetoothDevicesDialog());
+
+        // Инициализация Bluetooth
+        bluetoothAdapter = BluetoothAdapter.getDefaultAdapter();
+        if (bluetoothAdapter == null) {
+            connectButton.setEnabled(false);
+            Toast.makeText(this, "Bluetooth not supported", Toast.LENGTH_SHORT).show();
+        }
 
         CameraManager manager = (CameraManager) getSystemService(CAMERA_SERVICE);
         List<String> allCameraIds = new ArrayList<>();
@@ -217,7 +255,13 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         startButton.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                openCamera();
+                isSTART =! isSTART;
+                isFirst = true;
+                if (isSTART) {
+                    startButton.setText("STOP");
+                } else {
+                    startButton.setText("START");
+                }
             }
         });
 
@@ -307,6 +351,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         try {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
                 ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.CAMERA}, REQUEST_CAMERA_PERMISSION);
+                Toast.makeText(this, "NO PERMISSION!", Toast.LENGTH_SHORT).show();
                 return;
             }
             manager.openCamera(selectedCameraId, stateCallback, null);
@@ -435,11 +480,16 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         Image image = reader.acquireLatestImage();
         if (image == null) return;
 
-        processImage(image);
+        try {
+            processImage(image);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+
         image.close();
     };
 
-    private void processImage(Image image) {
+    private void processImage(Image image) throws IOException {
         Image.Plane yPlane = image.getPlanes()[0];
         ByteBuffer yBuffer = yPlane.getBuffer();
         int width = image.getWidth();
@@ -460,6 +510,16 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
 
         int viewCenterX = (int) (cX * scale1);
         int viewCenterY = (int) (cY * scale2);
+
+        if (isConnected && isSTART) {
+            sendMotorSpeed('C', (byte) 75);
+        }
+        else if (isConnected && !isSTART) {
+            if (isFirst){
+                sendMotorStop('C');
+                isFirst = false;
+            }
+        }
 
         runOnUiThread(() -> {
             overlayView.setCenter(viewCenterX, viewCenterY);
@@ -699,6 +759,359 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         } catch (CameraAccessException e) {
             e.printStackTrace();
         }
+    }
+    private void showBluetoothDevicesDialog() {
+
+        if (!isConnected) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                if (checkSelfPermission(Manifest.permission.BLUETOOTH_SCAN)
+                        != PackageManager.PERMISSION_GRANTED) {
+                    requestPermissions(
+                            new String[]{Manifest.permission.BLUETOOTH_SCAN},
+                            REQUEST_BLUETOOTH_PERMISSIONS
+                    );
+                    return;
+                }
+            }
+
+            if (!checkBluetoothPermissions()) {
+                requestBluetoothPermissions();
+                return;
+            }
+
+            if (bluetoothAdapter == null || !bluetoothAdapter.isEnabled()) {
+                Intent enableBtIntent = new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE);
+                if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
+                    Toast.makeText(this, "NO PERMISSION!", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                startActivityForResult(enableBtIntent, REQUEST_ENABLE_BT);
+                return;
+            }
+
+            Set<BluetoothDevice> pairedDevices = bluetoothAdapter.getBondedDevices();
+            List<BluetoothDevice> deviceList = new ArrayList<>(pairedDevices);
+            String[] deviceNames = deviceList.stream()
+                    .map(device -> device.getName() + "\n" + device.getAddress() + "\n------------------------------")
+                    .toArray(String[]::new);
+
+            new AlertDialog.Builder(this)
+                    .setTitle("Select Device")
+                    .setItems(deviceNames, (dialog, which) -> connectToDevice(deviceList.get(which)))
+                    .setNegativeButton("Cancel", null)
+                    .show();
+
+        }else{
+            setConnectionState(false);
+            disconnect();
+        }
+    }
+
+    private boolean checkBluetoothPermissions() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            return ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED;
+        } else {
+            return ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH) == PackageManager.PERMISSION_GRANTED;
+        }
+    }
+
+
+    private void requestBluetoothPermissions() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.BLUETOOTH_CONNECT}, REQUEST_BLUETOOTH_PERMISSIONS);
+        } else {
+            ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.BLUETOOTH}, REQUEST_BLUETOOTH_PERMISSIONS);
+        }
+    }
+
+    private void connectToDevice(BluetoothDevice device) {
+        // Реализуйте подключение здесь
+        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
+            Toast.makeText(this, "NO PERMISSION!", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        Toast.makeText(this, "Connecting to " + device.getName(), Toast.LENGTH_SHORT).show();
+        selectedDevice = device;
+        connectToDevice();
+    }
+/*
+    // Обновите onRequestPermissionsResult
+    @Override
+    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == REQUEST_BLUETOOTH_PERMISSIONS) {
+            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                showBluetoothDevicesDialog();
+            } else {
+                Toast.makeText(this, "Permission required", Toast.LENGTH_SHORT).show();
+            }
+        }
+    }
+*/
+    // Обработка включения Bluetooth
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQUEST_ENABLE_BT && resultCode == RESULT_OK) {
+            showBluetoothDevicesDialog();
+        }
+    }
+
+    private void connectToDevice() {
+        if (selectedDevice == null) {
+            return;
+        }
+
+        new Thread(() -> {
+            try {
+                if (ActivityCompat.checkSelfPermission(this, android.Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
+                    showToast("NO PERMISSION!");
+                    return;
+                }
+                socket = selectedDevice.createRfcommSocketToServiceRecord(EV3_UUID);
+                bluetoothAdapter.cancelDiscovery();
+                socket.connect();
+                outputStream = socket.getOutputStream();
+                inputStream = socket.getInputStream();
+
+                // Send initialization sequence
+                //sendCommand(new byte[]{0x02, 0x00, 0x01, 0x0F});
+
+                runOnUiThread(() -> {
+                    setConnectionState(true);
+                    showToast("Подключено к " + selectedDevice.getName());
+                });
+
+            } catch (IOException e) {
+                Log.e(TAG, "Connection error: " + e.getMessage());
+                runOnUiThread(() -> showToast("Ошибка подключения"));
+                disconnect();
+            }
+        }).start();
+    }
+
+    private void showToast(String message) {
+        new Handler(Looper.getMainLooper()).post(() ->
+                Toast.makeText(MainActivity.this, message, Toast.LENGTH_SHORT).show());
+    }
+
+    private void setConnectionState(boolean connected) {
+        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
+            return;
+        }
+        isConnected = connected;
+        connectButton.setText(connected ? selectedDevice.getName() : "Connect Bluetooth");
+        /*
+        btnConnect.setText(connected ? "Отключиться" : "Подключиться");
+        btnRefresh.setEnabled(!connected);
+        devicesList.setEnabled(!connected);
+
+        motorCSlider.setEnabled(connected);
+        motorDSlider.setEnabled(connected);
+        btnMotorCForward.setEnabled(connected);
+        btnMotorCBackward.setEnabled(connected);
+        btnMotorCStop.setEnabled(connected);
+        btnMotorDForward.setEnabled(connected);
+        btnMotorDBackward.setEnabled(connected);
+        btnMotorDStop.setEnabled(connected);
+         */
+    }
+
+    private void disconnect() {
+        try {
+            if (socket != null) {
+                socket.close();
+                outputStream = null;
+                inputStream = null;
+            }
+            runOnUiThread(() -> {
+                setConnectionState(false);
+                showToast("Отключено");
+            });
+        } catch (IOException e) {
+            Log.e(TAG, "Disconnect error: " + e.getMessage());
+        }
+    }
+
+    private void sendMotorSpeed(char port, byte speed) throws IOException {
+
+        ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
+        //Записываем номер сообщения.
+        writeUShort(byteArrayOutputStream, 2);
+        //Записываем тип команды (прямая команда, ответ не требуется).
+        writeUByte(byteArrayOutputStream, 0x80);
+        //Записываем количество зарезервированных байт для переменных (здесь ничего не резервируется).
+        writeVariablesAllocation(byteArrayOutputStream, 0, 0);
+        //Записываем код команды.
+        writeCommand(byteArrayOutputStream, 0xA5); // OUTPUT_POWER (0xA5)  OUTPUT_SPEED (0xA4).
+        //Записываем номер модуля EV3.
+        writeParameterAsSmallByte(byteArrayOutputStream, 0);
+        //Записываем номер порта
+        writeParameterAsSmallByte(byteArrayOutputStream, getPortByte(port));
+        //Записываем мощность (от -100 до 100).
+        writeParameterAsByte(byteArrayOutputStream, speed);
+
+        //Отправляем сообщение на EV3.
+        //Сначала отправляем размер сообщения.
+        writeUShort(outputStream, byteArrayOutputStream.size());
+        //Затем отправляем само сообщение.
+        byteArrayOutputStream.writeTo(outputStream);
+
+
+        byteArrayOutputStream.reset();
+
+
+        //START
+        //Записываем номер сообщения.
+        writeUShort(byteArrayOutputStream, 2);
+        //Записываем тип команды (прямая команда, ответ не требуется).
+        writeUByte(byteArrayOutputStream, 0x80);
+        //Записываем количество зарезервированных байт для переменных (здесь ничего не резервируется).
+        writeVariablesAllocation(byteArrayOutputStream, 0, 0);
+        //Записываем код команды.
+        writeCommand(byteArrayOutputStream, 0xA6);
+        //Записываем номер модуля EV3.
+        writeParameterAsSmallByte(byteArrayOutputStream, 0);
+        //Записываем номер порта
+        writeParameterAsSmallByte(byteArrayOutputStream, getPortByte(port));
+        //Отправляем сообщение на EV3.
+        //Сначала отправляем размер сообщения.
+        writeUShort(outputStream, byteArrayOutputStream.size());
+        //Затем отправляем само сообщение.
+        byteArrayOutputStream.writeTo(outputStream);
+
+    }
+
+    private void sendMotorSpeed_tik(char port, byte speed) throws IOException {
+
+        ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
+        //Записываем номер сообщения.
+        writeUShort(byteArrayOutputStream, 2);
+        //Записываем тип команды (прямая команда, ответ не требуется).
+        writeUByte(byteArrayOutputStream, 0x80);
+        //Записываем количество зарезервированных байт для переменных (здесь ничего не резервируется).
+        writeVariablesAllocation(byteArrayOutputStream, 0, 0);
+        //Записываем код команды.
+        writeCommand(byteArrayOutputStream, 0xAE);
+        //Записываем номер модуля EV3.
+        writeParameterAsSmallByte(byteArrayOutputStream, 0);
+        //Записываем номер порта
+        writeParameterAsSmallByte(byteArrayOutputStream, getPortByte(port));
+        //Записываем мощность (от -100 до 100).
+        writeParameterAsByte(byteArrayOutputStream, speed);
+        //Записываем, сколько оборотов двигатель будет разгоняться (0 - разгоняться будет моментально).
+        writeParameterAsInteger(byteArrayOutputStream, 0);
+        //Записываем, сколько оборотов двигатель будет крутиться на полной скорости (2,5 оборота, т.е. 900 градусов).
+        writeParameterAsInteger(byteArrayOutputStream, 900);
+        //Записываем, сколько оборотов двигатель будет замедляться (0,5 оборота, т.е. 180 градусов).
+        writeParameterAsInteger(byteArrayOutputStream, 180);
+        //Записываем, нужно ли тормозить в конце (1 - тормозить, 0 - не тормозить).
+        writeParameterAsUByte(byteArrayOutputStream, 1);
+
+        //Отправляем сообщение на EV3.
+        //Сначала отправляем размер сообщения.
+        writeUShort(outputStream, byteArrayOutputStream.size());
+        //Затем отправляем само сообщение.
+        byteArrayOutputStream.writeTo(outputStream);
+    }
+
+
+    private void sendMotorStop(char port) throws IOException {
+        ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
+        //STOP
+        //Записываем номер сообщения.
+        writeUShort(byteArrayOutputStream, 2);
+        //Записываем тип команды (прямая команда, ответ не требуется).
+        writeUByte(byteArrayOutputStream, 0x80);
+        //Записываем количество зарезервированных байт для переменных (здесь ничего не резервируется).
+        writeVariablesAllocation(byteArrayOutputStream, 0, 0);
+        //Записываем код команды.
+        writeCommand(byteArrayOutputStream, 0xA3); // OUTPUT_STOP
+        //Записываем номер модуля EV3.
+        writeParameterAsSmallByte(byteArrayOutputStream, 0);
+        //Записываем номер порта
+        writeParameterAsSmallByte(byteArrayOutputStream, getPortByte(port));
+        //Записываем, нужно ли тормозить в конце (1 - тормозить, 0 - не тормозить).
+        writeParameterAsUByte(byteArrayOutputStream, 1);
+        //Отправляем сообщение на EV3.
+        //Сначала отправляем размер сообщения.
+        writeUShort(outputStream, byteArrayOutputStream.size());
+        //Затем отправляем само сообщение.
+        byteArrayOutputStream.writeTo(outputStream);
+
+        // ПИСК!!!
+        //outputStream.write(new byte[]{14, 0, 0, 0, -128, 0, 0, -108, 1, 2, -126, -24, 3, -126, -24, 3});
+    }
+
+    private byte getPortByte(char port) {
+        switch (port) {
+            case 'A': return 0x01;
+            case 'B': return 0x02;
+            case 'C': return 0x04;
+            case 'D': return 0x08;
+            default:  return 0x00;
+        }
+    }
+
+    //Записывает unsigned byte.
+    private void writeUByte(OutputStream _stream, int _ubyte) throws IOException {
+        _stream.write(_ubyte > Byte.MAX_VALUE ? _ubyte - 256 : _ubyte);
+    }
+
+    //Записывает byte.
+    private void writeByte(OutputStream _stream, byte _byte) throws IOException {
+        _stream.write(_byte);
+    }
+
+    //Записывает unsigned short.
+    private void writeUShort(OutputStream _stream, int _ushort) throws IOException {
+        writeUByte(_stream, _ushort & 0xFF);
+        writeUByte(_stream, (_ushort >> 8) & 0xFF);
+    }
+
+
+    //Записывает команду.
+    private void writeCommand(OutputStream _stream, int opCode) throws IOException {
+        writeUByte(_stream, opCode);
+    }
+
+    //Записывает количество зарезервированных байт для глобальных и локальных переменных.
+    private void writeVariablesAllocation(OutputStream _stream, int globalSize, int localSize) throws IOException {
+        writeUByte(_stream, globalSize & 0xFF);
+        writeUByte(_stream, ((globalSize >> 8) & 0x3) | ((localSize << 2) & 0xFC));
+    }
+
+    //Записывает параметр с типом unsigned byte со значением в интервале 0-31 с помощью короткого формата.
+    private void writeParameterAsSmallByte(OutputStream _stream, int value) throws IOException {
+        if (value < 0 && value > 31)
+            throw new IllegalArgumentException("Значение должно быть в интервале от 0 до 31.");
+        writeUByte(_stream, value);
+    }
+
+    //Записывает параметр с типом unsigned byte.
+    private void writeParameterAsUByte(OutputStream _stream, int value) throws IOException {
+        if (value < 0 && value > 255)
+            throw new IllegalArgumentException("Значение должно быть в интервале от 0 до 255.");
+        writeUByte(_stream, 0x81);
+        writeUByte(_stream, value);
+    }
+
+    //Записывает параметр с типом byte.
+    private void writeParameterAsByte(OutputStream _stream, int value) throws IOException {
+        if (value < Byte.MIN_VALUE && value > Byte.MAX_VALUE)
+            throw new IllegalArgumentException("Значение должно быть в интервале от "
+                    + Byte.MIN_VALUE + " до " + Byte.MAX_VALUE + ".");
+        writeUByte(_stream, 0x81);
+        writeByte(_stream, (byte)value);
+    }
+
+    //Записывает параметр с типом int.
+    private void writeParameterAsInteger(OutputStream _stream, int value) throws IOException {
+        writeUByte(_stream, 0x83);
+        writeUByte(_stream, value & 0xFF);
+        writeUByte(_stream, (value >> 8) & 0xFF);
+        writeUByte(_stream, (value >> 16) & 0xFF);
+        writeUByte(_stream, (value >> 24) & 0xFF);
     }
 
     @Override public void onSurfaceTextureSizeChanged(@NonNull SurfaceTexture surface, int width, int height) {}
