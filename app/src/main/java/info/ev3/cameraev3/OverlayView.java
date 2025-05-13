@@ -103,11 +103,11 @@ public class OverlayView extends View {
 
         // Draw resolution text
         if (!resolutionText.isEmpty()) {
-            canvas.drawText(resolutionText, 20, 60, textPaint); // Position: x=20, y=60
+            canvas.drawText(resolutionText, 20, 120, textPaint); // Position: x=20, y=60
         }
 
         if (centerXraw != -1 && centerYraw != -1) {
-            canvas.drawText("("+ centerXraw + ", " + centerYraw + ")", 20, 100, textPaint);
+            canvas.drawText("("+ centerXraw + ", " + centerYraw + ")", 20, 170, textPaint);
         }
 
         // Отрисовка центра
@@ -121,7 +121,7 @@ public class OverlayView extends View {
 
         if (fps > 0) {
             String fpsText = String.format("%.1f FPS", fps);
-            canvas.drawText(fpsText, getWidth() - 20, 60, fpsPaint);
+            canvas.drawText(fpsText, getWidth() - 20, 120, fpsPaint);
         }
     }
 }
