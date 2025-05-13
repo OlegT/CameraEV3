@@ -1,6 +1,7 @@
 package info.ev3.cameraev3;
 import android.Manifest;
 import android.bluetooth.BluetoothSocket;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.ImageFormat;
@@ -105,9 +106,21 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
     private ArrayList<BluetoothDevice> ev3Devices = new ArrayList<>();
     private BluetoothDevice selectedDevice;
     private Button connectButton;
+    private EditText speedValue;
+    int speed = 75;
+    private EditText kpValue;
+    double kp = 1.0;
+    private EditText kdValue;
+    double kd = 0.5;
     private boolean isConnected = false;
     private boolean isSTART = false;
     private boolean isFirst = true;
+    private static final String PREFS_NAME = "AppSettings";
+    private static final String KEY_THRESHOLD = "threshold";
+    private static final String KEY_TRANSPARENCY = "transparency";
+    private static final String KEY_SPEED = "speed";
+    private static final String KEY_KP = "kp";
+    private static final String KEY_KD = "kd";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -129,6 +142,9 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         flashCheckbox = findViewById(R.id.flashCheckbox);
         connectButton = findViewById(R.id.connectButton);
         connectButton.setOnClickListener(v -> showBluetoothDevicesDialog());
+        speedValue = findViewById(R.id.speedValue);
+        kpValue = findViewById(R.id.kpValue);
+        kdValue = findViewById(R.id.kdValue);
 
         // Инициализация Bluetooth
         bluetoothAdapter = BluetoothAdapter.getDefaultAdapter();
@@ -277,12 +293,20 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         transparencySeekBar.setProgress(128);
         thresholdSeekBar.setProgress(binarizationThreshold);
 
+
+        loadSettings();
+
+        speedValue.addTextChangedListener(new GenericTextWatcher());
+        kpValue.addTextChangedListener(new GenericTextWatcher());
+        kdValue.addTextChangedListener(new GenericTextWatcher());
+
         // Слушатели изменений
         transparencySeekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
                 transparencyValue.setText(String.valueOf(progress));
                 overlayView.setBitmapAlpha(progress);
+                saveSettings();
             }
 
             @Override public void onStartTrackingTouch(SeekBar seekBar) {}
@@ -294,6 +318,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
                 thresholdValue.setText(String.valueOf(progress));
                 binarizationThreshold = progress;
+                saveSettings();
             }
 
             @Override public void onStartTrackingTouch(SeekBar seekBar) {}
@@ -341,6 +366,18 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
 
     }
 
+    private class GenericTextWatcher implements TextWatcher {
+        @Override
+        public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+
+        @Override
+        public void onTextChanged(CharSequence s, int start, int before, int count) {}
+
+        @Override
+        public void afterTextChanged(Editable s) {
+            saveSettings();
+        }
+    }
     private void openCamera() {
         if (!isCameraSupported(selectedCameraId)) {
             log("Камера " + selectedCameraId + " не поддерживает предпросмотр");
@@ -1112,6 +1149,65 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         writeUByte(_stream, (value >> 8) & 0xFF);
         writeUByte(_stream, (value >> 16) & 0xFF);
         writeUByte(_stream, (value >> 24) & 0xFF);
+    }
+
+    private void saveSettings() {
+        SharedPreferences settings = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        SharedPreferences.Editor editor = settings.edit();
+
+        try{
+                speed = Integer.parseInt(speedValue.getText().toString());
+            } catch (NumberFormatException e) {
+                speed = 0;
+            }
+
+        try {
+                kp = Float.parseFloat(kpValue.getText().toString());
+            } catch (NumberFormatException e) {
+                kp = 0;
+            }
+
+        try {
+                kd = Float.parseFloat(kdValue.getText().toString());
+            } catch (NumberFormatException e) {
+                kd = 0;
+            }
+
+
+        editor.putInt(KEY_THRESHOLD, binarizationThreshold);
+        editor.putInt(KEY_TRANSPARENCY, transparencySeekBar.getProgress());
+        editor.putInt(KEY_SPEED, speed);
+        editor.putFloat(KEY_KP, (float)kp);
+        editor.putFloat(KEY_KD, (float)kd);
+
+        editor.apply();
+    }
+
+    private void loadSettings() {
+        SharedPreferences settings = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+
+        // Порог бинаризации
+        binarizationThreshold = settings.getInt(KEY_THRESHOLD, 128);
+        thresholdSeekBar.setProgress(binarizationThreshold);
+        thresholdValue.setText(String.valueOf(binarizationThreshold));
+
+        // Прозрачность
+        int transparency = settings.getInt(KEY_TRANSPARENCY, 128);
+        transparencySeekBar.setProgress(transparency);
+        transparencyValue.setText(String.valueOf(transparency));
+        overlayView.setBitmapAlpha(transparency);
+
+        // SPEED
+        speed = settings.getInt(KEY_SPEED, 75);
+        speedValue.setText(String.valueOf(speed));
+
+        // Kp
+        kp = settings.getFloat(KEY_KP, 1.0f);
+        kpValue.setText(String.valueOf(kp));
+
+        // Kd
+        kd = settings.getFloat(KEY_KD, 0.5f);
+        kdValue.setText(String.valueOf(kd));
     }
 
     @Override public void onSurfaceTextureSizeChanged(@NonNull SurfaceTexture surface, int width, int height) {}
