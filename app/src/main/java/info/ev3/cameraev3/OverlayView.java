@@ -87,8 +87,8 @@ public class OverlayView extends View {
         }
 
         // Draw lines
-        canvas.drawLine(w/3f, 0, w/3f, h, paint);
-        canvas.drawLine(2*w/3f, 0, 2*w/3f, h, paint);
+        canvas.drawLine(w/2f, 0, w/2f, h, paint);
+        //canvas.drawLine(2*w/3f, 0, 2*w/3f, h, paint);
 
         // Draw resolution text
         if (!resolutionText.isEmpty()) {

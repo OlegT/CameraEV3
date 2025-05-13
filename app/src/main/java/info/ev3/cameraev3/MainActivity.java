@@ -42,6 +42,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.text.DecimalFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedList;
@@ -112,6 +113,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
     double kp = 1.0;
     private EditText kdValue;
     double kd = 0.5;
+    double e_last = 0;
     private boolean isConnected = false;
     private boolean isSTART = false;
     private boolean isFirst = true;
@@ -548,11 +550,15 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         int viewCenterX = (int) (cX * scale1);
         int viewCenterY = (int) (cY * scale2);
 
+
+        double ang = PID(cX*2.0/height - 1.0, kp, kd);
+
         if (isConnected && isSTART) {
-            sendMotorSpeed('C', (byte) 75);
+            AngleMotors(ang, speed);
         }
         else if (isConnected && !isSTART) {
             if (isFirst){
+                sendMotorStop('B');
                 sendMotorStop('C');
                 isFirst = false;
             }
@@ -570,6 +576,9 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                     "width = " + width + " height = " + height);
 
              */
+            DecimalFormat df = new DecimalFormat("#.##");
+            logOutput.setText(" e=" + df.format(cX*2.0/height - 1.0) + "\n"+
+                    "Ang=" + df.format(ang) + " Ang_=" + df.format(ang*180/Math.PI) );
         });
     }
 
@@ -862,7 +871,6 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
     }
 
     private void connectToDevice(BluetoothDevice device) {
-        // Реализуйте подключение здесь
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
             Toast.makeText(this, "NO PERMISSION!", Toast.LENGTH_SHORT).show();
             return;
@@ -871,20 +879,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         selectedDevice = device;
         connectToDevice();
     }
-/*
-    // Обновите onRequestPermissionsResult
-    @Override
-    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-        if (requestCode == REQUEST_BLUETOOTH_PERMISSIONS) {
-            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                showBluetoothDevicesDialog();
-            } else {
-                Toast.makeText(this, "Permission required", Toast.LENGTH_SHORT).show();
-            }
-        }
-    }
-*/
+
     // Обработка включения Bluetooth
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
@@ -910,9 +905,6 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                 socket.connect();
                 outputStream = socket.getOutputStream();
                 inputStream = socket.getInputStream();
-
-                // Send initialization sequence
-                //sendCommand(new byte[]{0x02, 0x00, 0x01, 0x0F});
 
                 runOnUiThread(() -> {
                     setConnectionState(true);
@@ -1208,6 +1200,23 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         // Kd
         kd = settings.getFloat(KEY_KD, 0.5f);
         kdValue.setText(String.valueOf(kd));
+    }
+
+    double PID(double e, double kp, double kd){
+        double res = e * kp + (e - e_last) * kd;
+        e_last = e;
+        return res;
+    }
+
+    void AngleMotors(double Angle, int Power) throws IOException {
+        if (Angle>0)
+        {
+            sendMotorSpeed('B', (byte) (int) (Power * Math.cos(2 * Angle)));
+            sendMotorSpeed('C', (byte) Power);
+        }else{
+            sendMotorSpeed('B', (byte) Power);
+            sendMotorSpeed('C', (byte) (int) (Power * Math.cos(2 * Angle)));
+        }
     }
 
     @Override public void onSurfaceTextureSizeChanged(@NonNull SurfaceTexture surface, int width, int height) {}
