@@ -26,37 +26,39 @@
                 android:background="@android:color/transparent" />
         </FrameLayout>
 
-        <LinearLayout
-            android:layout_width="match_parent"
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginLeft="8dp"
+        android:layout_marginTop="8dp"
+        android:layout_marginRight="8dp"
+        android:orientation="horizontal">
+
+        <Button
+            android:id="@+id/connectButton"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:orientation="horizontal">
+            android:layout_weight="1"
+            android:text="Connect Bluetooth"
+            android:textColor="@color/white" />
 
-            <Button
-                android:id="@+id/connectButton"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="Connect Bluetooth"
-                android:textColor="@color/white" />
+        <Spinner
+            android:id="@+id/cameraSpinner"
+            style="?android:attr/spinnerStyle"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:layout_weight="1"
+            android:spinnerMode="dropdown" />
 
-            <Spinner
-                android:id="@+id/cameraSpinner"
-                style="?android:attr/spinnerStyle"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="8dp"
-                android:layout_weight="1"
-                android:spinnerMode="dropdown" />
+        <CheckBox
+            android:id="@+id/flashCheckbox"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:text="Flash" />
 
-            <CheckBox
-                android:id="@+id/flashCheckbox"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="8dp"
-                android:text="Flash"/>
-
-        </LinearLayout>
+    </LinearLayout>
 
         <!-- Добавленные ползунки -->
     <LinearLayout
@@ -139,7 +141,9 @@
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:layout_marginLeft="8dp"
         android:layout_marginTop="8dp"
+        android:layout_marginRight="8dp"
         android:orientation="horizontal">
 
         <Button

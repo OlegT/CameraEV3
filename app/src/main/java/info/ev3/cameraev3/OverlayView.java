@@ -20,7 +20,8 @@ public class OverlayView extends View {
     private Paint centerPaint;
     private Bitmap overlayBitmap;
     private Paint bitmapPaint;
-
+    private float fps = 0;
+    private Paint fpsPaint;
 
     public OverlayView(Context context, AttributeSet attrs) {
         super(context, attrs);
@@ -44,6 +45,12 @@ public class OverlayView extends View {
         centerPaint.setColor(0xFFFF0000); // Красный цвет
         centerPaint.setStrokeWidth(10);
         centerPaint.setStyle(Paint.Style.STROKE);
+
+        fpsPaint = new Paint();
+        fpsPaint.setColor(0xFFFF00FF); // Фиолетовый цвет
+        fpsPaint.setTextSize(50);
+        fpsPaint.setTextAlign(Paint.Align.RIGHT);
+        fpsPaint.setAntiAlias(true);
     }
 
     public void setBitmapAlpha(int alpha) {
@@ -51,6 +58,10 @@ public class OverlayView extends View {
         invalidate();
     }
 
+    public void setFps(float fps) {
+        this.fps = fps;
+        invalidate();
+    }
     public void setOverlayBitmap(Bitmap bitmap) {
         this.overlayBitmap = bitmap;
     }
@@ -106,6 +117,11 @@ public class OverlayView extends View {
             canvas.drawCircle(centerX, centerY, 20, centerPaint);
             canvas.drawLine(centerX - 30, centerY, centerX + 30, centerY, centerPaint);
             canvas.drawLine(centerX, centerY - 30, centerX, centerY + 30, centerPaint);
+        }
+
+        if (fps > 0) {
+            String fpsText = String.format("%.1f FPS", fps);
+            canvas.drawText(fpsText, getWidth() - 20, 60, fpsPaint);
         }
     }
 }

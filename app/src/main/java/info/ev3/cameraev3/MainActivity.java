@@ -123,6 +123,9 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
     private static final String KEY_SPEED = "speed";
     private static final String KEY_KP = "kp";
     private static final String KEY_KD = "kd";
+    private long lastFpsUpdateTime = 0;
+    private int frameCount = 0;
+    private float currentFps = 0;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -487,6 +490,9 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         Surface surface = new Surface(texture);
         try {
             previewRequestBuilder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
+            previewRequestBuilder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON);
+            previewRequestBuilder.set(CaptureRequest.NOISE_REDUCTION_MODE, CaptureRequest.NOISE_REDUCTION_MODE_MINIMAL);
+            previewRequestBuilder.set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO);
             previewRequestBuilder.addTarget(surface);
             previewRequestBuilder.addTarget(imageReader.getSurface()); // Добавляем ImageReader
 
@@ -529,6 +535,17 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
     };
 
     private void processImage(Image image) throws IOException {
+
+        frameCount++;
+        long currentTime = System.currentTimeMillis();
+        if (currentTime - lastFpsUpdateTime >= 1000) {
+            currentFps = frameCount * 1000f / (currentTime - lastFpsUpdateTime);
+            frameCount = 0;
+            lastFpsUpdateTime = currentTime;
+            runOnUiThread(() -> overlayView.setFps(currentFps));
+        }
+
+
         Image.Plane yPlane = image.getPlanes()[0];
         ByteBuffer yBuffer = yPlane.getBuffer();
         int width = image.getWidth();
@@ -538,6 +555,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
 
         byte[] yData = new byte[yBuffer.remaining()];
         yBuffer.get(yData);
+        image.close();
 
         // Создаем бинарную маску
         overlayBitmap = createBinaryMask(yData, width, height, rowStride, pixelStride);
