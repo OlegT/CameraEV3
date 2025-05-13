@@ -586,7 +586,15 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         double ang = PID(cX*2.0/height - 1.0, kp, kd);
 
         if (isConnected && isSTART) {
-            AngleMotors(ang, speed);
+            //AngleMotors(ang, speed);
+            if (ang>0)
+            {
+                sendMotorSpeed('B', (byte) (int) (speed * Math.cos(2 * ang)));
+                sendMotorSpeed('C', (byte) speed);
+            }else{
+                sendMotorSpeed('B', (byte) speed);
+                sendMotorSpeed('C', (byte) (int) (speed * Math.cos(2 * ang)));
+            }
         }
         else if (isConnected && !isSTART) {
             if (isFirst){
@@ -610,7 +618,9 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
              */
             DecimalFormat df = new DecimalFormat("#.##");
             logOutput.setText(" e=" + df.format(cX*2.0/height - 1.0) + "\n"+
-                    "Ang=" + df.format(ang) + " Ang_=" + df.format(ang*180/Math.PI) );
+                    "Ang=" + df.format(ang) + " Ang_=" + df.format(ang*180/Math.PI) +"\n"+
+                    "Speed = " + (int) (speed * Math.cos(2 * ang))
+            );
         });
     }
 

@@ -240,6 +240,9 @@
         android:layout_marginTop="8dp"
         android:background="@android:drawable/edit_text"
         android:gravity="top"
+        android:enabled="true"
+        android:focusable="false"
+        android:focusableInTouchMode="false"
         android:inputType="textMultiLine"
         android:lines="5" />
 </LinearLayout>
