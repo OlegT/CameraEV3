@@ -1,4 +1,5 @@
 package info.ev3.cameraev3;
+
 import android.Manifest;
 import android.bluetooth.BluetoothSocket;
 import android.content.SharedPreferences;
@@ -48,15 +49,16 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Locale;
+import java.util.Queue;
+import java.util.Set;
+import java.util.UUID;
 
 import android.media.Image;
 import android.media.ImageReader;
 import android.os.Handler;
 import android.os.HandlerThread;
 import java.nio.ByteBuffer;
-import java.util.Queue;
-import java.util.Set;
-import java.util.UUID;
 
 import android.widget.SeekBar;
 import android.widget.Toast;
@@ -89,7 +91,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
     private float scaleY = 1.0f;
     private float scale1 = 1.0f;
     private float scale2 = 1.0f;
-    private static final int BINARIZATION_THRESHOLD = 128; // Порог яркости (0-255)
+    private static final int BINARIZATION_THRESHOLD = 128;
     private Bitmap overlayBitmap;
     private SeekBar transparencySeekBar;
     private SeekBar thresholdSeekBar;
@@ -165,7 +167,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         kpValue = findViewById(R.id.kpValue);
         kdValue = findViewById(R.id.kdValue);
 
-        // Инициализация Bluetooth
+        // Bluetooth initialization
         bluetoothAdapter = BluetoothAdapter.getDefaultAdapter();
         if (bluetoothAdapter == null) {
             connectButton.setEnabled(false);
@@ -173,52 +175,14 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         }
 
         CameraManager manager = (CameraManager) getSystemService(CAMERA_SERVICE);
-        List<String> allCameraIds = new ArrayList<>();
-        List<String> cameraNames = new ArrayList<>();
-
         try {
             cameraIds = manager.getCameraIdList();
             selectedCameraId = cameraIds[0];
 
-            try {
-                for (String cameraId : cameraIds) {
-                    CameraCharacteristics characteristics = manager.getCameraCharacteristics(cameraId);
-                    Integer lensFacing = characteristics.get(CameraCharacteristics.LENS_FACING);
+            // Use all cameras
+            cameraIds = manager.getCameraIdList();
 
-                    // Добавляем все камеры в список
-                    allCameraIds.add(cameraId);
-
-                    // Определяем тип камеры
-                    String cameraType = "Unknown";
-                    if (lensFacing != null) {
-                        switch (lensFacing) {
-                            case CameraCharacteristics.LENS_FACING_BACK:
-                                cameraType = "Back";
-                                break;
-                            case CameraCharacteristics.LENS_FACING_FRONT:
-                                cameraType = "Forward";
-                                break;
-                            case CameraCharacteristics.LENS_FACING_EXTERNAL:
-                                cameraType = "External";
-                                break;
-                        }
-                    }
-
-                    // Получаем разрешение
-                    StreamConfigurationMap map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
-                    Size[] sizes = map != null ? map.getOutputSizes(SurfaceTexture.class) : new Size[0];
-                    String resolution = sizes.length > 0 ? sizes[0].getWidth() + "x" + sizes[0].getHeight() : "N/A";
-
-                    cameraNames.add(cameraType + " #" + cameraId + " (" + resolution + ")");
-                }
-            } catch (CameraAccessException e) {
-                e.printStackTrace();
-            }
-
-            // Используем все камеры
-            cameraIds = allCameraIds.toArray(new String[0]);
-
-
+            // Set preview size for first camera
             try {
                 CameraCharacteristics characteristics = manager.getCameraCharacteristics(selectedCameraId);
                 StreamConfigurationMap map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
@@ -230,13 +194,12 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                 e.printStackTrace();
             }
 
-
-            // Spinner adapter
-            cameraNames = getCameraNames(manager, cameraIds);
+            // Camera names with details
+            List<String> cameraNames = getCameraNames(manager, cameraIds);
             ArrayAdapter<String> adapter = new ArrayAdapter<>(
                     this,
                     android.R.layout.simple_spinner_item,
-                    cameraNames // Список сформирован для всех камер
+                    cameraNames
             );
             adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
             cameraSpinner.setAdapter(adapter);
@@ -269,7 +232,6 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                 @Override
                 public void onNothingSelected(AdapterView<?> parent) {}
             });
-            // По умолчанию первая камера
             if (cameraIds.length > 0) selectedCameraId = cameraIds[0];
         } catch (CameraAccessException e) {
             e.printStackTrace();
@@ -290,7 +252,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         startButton.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                isSTART =! isSTART;
+                isSTART = !isSTART;
                 isFirst = true;
                 if (isSTART) {
                     startButton.setText("STOP");
@@ -300,18 +262,14 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
             }
         });
 
-        // Инициализация
         transparencyValue = findViewById(R.id.transparencyValue);
         thresholdValue = findViewById(R.id.thresholdValue);
 
-        // Инициализация ползунков
         transparencySeekBar = findViewById(R.id.transparencySeekBar);
         thresholdSeekBar = findViewById(R.id.thresholdSeekBar);
 
-        // Начальные значения
         transparencySeekBar.setProgress(128);
         thresholdSeekBar.setProgress(binarizationThreshold);
-
 
         loadSettings();
 
@@ -319,7 +277,6 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         kpValue.addTextChangedListener(new GenericTextWatcher());
         kdValue.addTextChangedListener(new GenericTextWatcher());
 
-        // Слушатели изменений
         transparencySeekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
@@ -344,14 +301,9 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
             @Override public void onStopTrackingTouch(SeekBar seekBar) {}
         });
 
-        // Слушатели для EditText
         transparencyValue.addTextChangedListener(new TextWatcher() {
-            @Override
-            public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
-
-            @Override
-            public void onTextChanged(CharSequence s, int start, int before, int count) {}
-
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {}
             @Override
             public void afterTextChanged(Editable s) {
                 try {
@@ -365,12 +317,8 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         });
 
         thresholdValue.addTextChangedListener(new TextWatcher() {
-            @Override
-            public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
-
-            @Override
-            public void onTextChanged(CharSequence s, int start, int before, int count) {}
-
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {}
             @Override
             public void afterTextChanged(Editable s) {
                 try {
@@ -386,20 +334,14 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
     }
 
     private class GenericTextWatcher implements TextWatcher {
-        @Override
-        public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
-
-        @Override
-        public void onTextChanged(CharSequence s, int start, int before, int count) {}
-
-        @Override
-        public void afterTextChanged(Editable s) {
-            saveSettings();
-        }
+        @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+        @Override public void onTextChanged(CharSequence s, int start, int before, int count) {}
+        @Override public void afterTextChanged(Editable s) { saveSettings(); }
     }
+
     private void openCamera() {
         if (!isCameraSupported(selectedCameraId)) {
-            log("Камера " + selectedCameraId + " не поддерживает предпросмотр");
+            log("Camera " + selectedCameraId + " does not support preview");
             return;
         }
 
@@ -411,9 +353,9 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                 return;
             }
             manager.openCamera(selectedCameraId, stateCallback, null);
-            log("Открытие камеры: " + selectedCameraId);
+            log("Opening camera: " + selectedCameraId);
         } catch (CameraAccessException | SecurityException e) {
-            log("Ошибка доступа: " + e.getMessage());
+            log("Access error: " + e.getMessage());
         }
     }
 
@@ -427,22 +369,21 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
             return false;
         }
     }
+
     private void adjustAspectRatio() {
         if (previewSize == null) return;
 
         DisplayMetrics metrics = getResources().getDisplayMetrics();
         int screenWidth = metrics.widthPixels;
 
-        // Рассчитываем соотношение сторон превью
         float ratio = (float) previewSize.getWidth() / previewSize.getHeight();
         int previewHeight = (int) (screenWidth / ratio);
 
-        // Сохраняем коэффициенты масштабирования
         scaleX = (float) screenWidth / previewSize.getWidth();
         scaleY = (float) previewHeight / previewSize.getHeight();
 
         scale1 = (float) screenWidth / previewSize.getHeight();
-        scale2 = (float) previewHeight /  previewSize.getWidth();
+        scale2 = (float) previewHeight / previewSize.getWidth();
 
         ViewGroup.LayoutParams containerParams = previewContainer.getLayoutParams();
         containerParams.width = screenWidth;
@@ -483,7 +424,6 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         if (cameraDevice == null || !textureView.isAvailable() || previewSize == null) return;
         adjustAspectRatio();
 
-        // Создаем ImageReader
         if (imageReader != null) {
             imageReader.close();
         }
@@ -495,7 +435,6 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         );
         imageReader.setOnImageAvailableListener(imageAvailableListener, backgroundHandler);
 
-        // Update resolution text in overlay
         String resolution = previewSize.getWidth() + "x" + previewSize.getHeight();
         overlayView.setResolution(resolution);
 
@@ -508,7 +447,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
             previewRequestBuilder.set(CaptureRequest.NOISE_REDUCTION_MODE, CaptureRequest.NOISE_REDUCTION_MODE_MINIMAL);
             previewRequestBuilder.set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO);
             previewRequestBuilder.addTarget(surface);
-            previewRequestBuilder.addTarget(imageReader.getSurface()); // Добавляем ImageReader
+            previewRequestBuilder.addTarget(imageReader.getSurface());
 
             List<Surface> surfaces = Arrays.asList(surface, imageReader.getSurface());
             cameraDevice.createCaptureSession(surfaces, new CameraCaptureSession.StateCallback() {
@@ -549,7 +488,6 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
     };
 
     private void processImage(Image image) throws IOException {
-
         frameCount++;
         long currentTime = System.currentTimeMillis();
         if (currentTime - lastFpsUpdateTime >= 1000) {
@@ -558,7 +496,6 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
             lastFpsUpdateTime = currentTime;
             runOnUiThread(() -> overlayView.setFps(currentFps));
         }
-
 
         Image.Plane yPlane = image.getPlanes()[0];
         ByteBuffer yBuffer = yPlane.getBuffer();
@@ -571,33 +508,28 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         yBuffer.get(yData);
         image.close();
 
-        // Создаем бинарную маску
         overlayBitmap = createBinaryMask(yData, width, height, rowStride, pixelStride);
 
         int[] center = findLargestDarkSpotCenter(overlayBitmap);
 
-        int cX = height-center[1];
+        int cX = height - center[1];
         int cY = center[0];
 
         int viewCenterX = (int) (cX * scale1);
         int viewCenterY = (int) (cY * scale2);
 
-
-        double ang = PID(cX*2.0/height - 1.0, kp, kd);
+        double ang = PID(cX * 2.0 / height - 1.0, kp, kd);
 
         if (isConnected && isSTART) {
-            //AngleMotors(ang, speed);
-            if (ang>0)
-            {
+            if (ang > 0) {
                 sendMotorSpeed('B', (byte) (int) (speed * Math.cos(2 * ang)));
                 sendMotorSpeed('C', (byte) speed);
-            }else{
+            } else {
                 sendMotorSpeed('B', (byte) speed);
                 sendMotorSpeed('C', (byte) (int) (speed * Math.cos(2 * ang)));
             }
-        }
-        else if (isConnected && !isSTART) {
-            if (isFirst){
+        } else if (isConnected && !isSTART) {
+            if (isFirst) {
                 sendMotorStop('B');
                 sendMotorStop('C');
                 isFirst = false;
@@ -606,32 +538,18 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
 
         runOnUiThread(() -> {
             overlayView.setCenter(viewCenterX, viewCenterY);
-            overlayView.setCenterRaw(cX*176/144, cY*144/176);
+            overlayView.setCenterRaw(cX * 176 / 144, cY * 144 / 176);
             overlayView.setOverlayBitmap(overlayBitmap);
             overlayView.invalidate();
-            /*
-            logOutput.setText(
-                    "RAW coordinates: X=" + (height-center[1]) + " Y=" + center[0] + "\n" +
-                    "View coordinates:X=" + viewCenterX + " Y=" + viewCenterY + "\n" +
-                    "width = " + width + " height = " + height);
-
-             */
             DecimalFormat df = new DecimalFormat("#.##");
-            logOutput.setText(" e=" + df.format(cX*2.0/height - 1.0) + "\n"+
-                    "Ang=" + df.format(ang) + " Ang_=" + df.format(ang*180/Math.PI) +"\n"+
+            logOutput.setText(" e=" + df.format(cX * 2.0 / height - 1.0) + "\n" +
+                    "Ang=" + df.format(ang) + " Ang_=" + df.format(ang * 180 / Math.PI) + "\n" +
                     "Speed = " + (int) (speed * Math.cos(2 * ang))
             );
         });
     }
 
     private Bitmap createBinaryMask(byte[] yData, int width, int height, int rowStride, int pixelStride) {
-
-        /*
-        int scaleFactor = 2; // Уменьшение в 2 раза
-        width /= scaleFactor;
-        height /= scaleFactor;
-        */
-
         int[] pixels = new int[width * height];
 
         for (int y = 0; y < height; y++) {
@@ -641,48 +559,15 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
 
                 int luminance = yData[index] & 0xFF;
                 int color = (luminance < binarizationThreshold)
-                        ? 0xFF000000 // черный
-                        : 0xFFFFFFFF; // белый
+                        ? 0xFF000000
+                        : 0xFFFFFFFF;
                 pixels[y * width + x] = color;
-                //pixels[x * height + y] = color;
             }
         }
 
         Bitmap bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
         bitmap.setPixels(pixels, 0, width, 0, 0, width, height);
         return bitmap;
-    }
-
-    private int[] findDarkestSpot(Bitmap bitmap) {
-        if (bitmap == null) {
-            return new int[]{-1, -1};
-        }
-
-        int width = bitmap.getWidth();
-        int height = bitmap.getHeight();
-        int[] pixels = new int[width * height];
-        bitmap.getPixels(pixels, 0, width, 0, 0, width, height);
-
-        int sumX = 0;
-        int sumY = 0;
-        int count = 0;
-
-        for (int y = 0; y < height; y++) {
-            for (int x = 0; x < width; x++) {
-                int pixel = pixels[y * width + x];
-                int rgb = pixel & 0x00FFFFFF;
-                if (rgb == 0x000000) {
-                    sumX += x;
-                    sumY += y;
-                    count++;
-                }
-            }
-        }
-        if (count > 0) {
-            int[] result = {sumX / count, sumY / count};
-            return result;
-        }
-        return new int[]{-1, -1};
     }
 
     private int[] findLargestDarkSpotCenter(Bitmap bitmap) {
@@ -750,7 +635,6 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         }
     }
 
-
     private void log(String message) {
         logOutput.append(message + "\n");
     }
@@ -780,29 +664,58 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         }
         return minSize;
     }
+
     private List<String> getCameraNames(CameraManager manager, String[] cameraIds) {
         List<String> names = new ArrayList<>();
-        try {
-            for (String cameraId : cameraIds) {
+        for (String cameraId : cameraIds) {
+            try {
                 CameraCharacteristics characteristics = manager.getCameraCharacteristics(cameraId);
                 Integer lensFacing = characteristics.get(CameraCharacteristics.LENS_FACING);
-                int facing = (lensFacing != null) ? lensFacing : -1;
-                String cameraType;
-
-                if (facing == CameraCharacteristics.LENS_FACING_BACK) {
-                    cameraType = "Задняя";
-                } else if (facing == CameraCharacteristics.LENS_FACING_FRONT) {
-                    cameraType = "Передняя";
-                } else if (facing == CameraCharacteristics.LENS_FACING_EXTERNAL) {
-                    cameraType = "Внешняя";
-                } else {
-                    cameraType = "Неизвестная";
+                String lensFacingStr;
+                switch (lensFacing != null ? lensFacing : -1) {
+                    case CameraCharacteristics.LENS_FACING_BACK:
+                        lensFacingStr = "Back";
+                        break;
+                    case CameraCharacteristics.LENS_FACING_FRONT:
+                        lensFacingStr = "Front";
+                        break;
+                    case CameraCharacteristics.LENS_FACING_EXTERNAL:
+                        lensFacingStr = "External";
+                        break;
+                    default:
+                        lensFacingStr = "Unknown";
                 }
 
-                names.add(cameraType + " #" + cameraId);
+                float[] focalLengths = characteristics.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS);
+                String focalStr = (focalLengths != null && focalLengths.length > 0)
+                        ? String.format(Locale.US, " %.1fmm", focalLengths[0])
+                        : "";
+
+                String physicalIds = "";
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    physicalIds = characteristics.getPhysicalCameraIds().toString();
+                    if (!physicalIds.isEmpty()) physicalIds = " physId=" + physicalIds;
+                }
+
+                StreamConfigurationMap map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
+                String resolution = "N/A";
+                if (map != null) {
+                    Size[] sizes = map.getOutputSizes(SurfaceTexture.class);
+                    if (sizes != null && sizes.length > 0) {
+                        Size max = sizes[0];
+                        for (Size s : sizes) {
+                            if (s.getWidth() * s.getHeight() > max.getWidth() * max.getHeight()) {
+                                max = s;
+                            }
+                        }
+                        resolution = max.getWidth() + "x" + max.getHeight();
+                    }
+                }
+
+                names.add(lensFacingStr + " #" + cameraId + " (" + resolution + focalStr + physicalIds + ")");
+            } catch (CameraAccessException e) {
+                names.add("Access error for #" + cameraId);
             }
-        } catch (CameraAccessException e) {
-            e.printStackTrace();
         }
         return names;
     }
@@ -824,7 +737,8 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         try {
             CameraManager manager = (CameraManager) getSystemService(CAMERA_SERVICE);
             CameraCharacteristics characteristics = manager.getCameraCharacteristics(selectedCameraId);
-            isFlashSupported = characteristics.get(CameraCharacteristics.FLASH_INFO_AVAILABLE);
+            Boolean flash = characteristics.get(CameraCharacteristics.FLASH_INFO_AVAILABLE);
+            isFlashSupported = (flash != null && flash);
         } catch (CameraAccessException e) {
             e.printStackTrace();
             isFlashSupported = false;
@@ -848,8 +762,8 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
             e.printStackTrace();
         }
     }
-    private void showBluetoothDevicesDialog() {
 
+    private void showBluetoothDevicesDialog() {
         if (!isConnected) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 if (checkSelfPermission(Manifest.permission.BLUETOOTH_SCAN)
@@ -889,7 +803,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                     .setNegativeButton("Cancel", null)
                     .show();
 
-        }else{
+        } else {
             setConnectionState(false);
             disconnect();
         }
@@ -902,7 +816,6 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
             return ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH) == PackageManager.PERMISSION_GRANTED;
         }
     }
-
 
     private void requestBluetoothPermissions() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -922,7 +835,6 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         connectToDevice();
     }
 
-    // Обработка включения Bluetooth
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
@@ -950,12 +862,12 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
 
                 runOnUiThread(() -> {
                     setConnectionState(true);
-                    showToast("Подключено к " + selectedDevice.getName());
+                    showToast("Connected to " + selectedDevice.getName());
                 });
 
             } catch (IOException e) {
                 Log.e(TAG, "Connection error: " + e.getMessage());
-                runOnUiThread(() -> showToast("Ошибка подключения"));
+                runOnUiThread(() -> showToast("Connection error"));
                 disconnect();
             }
         }).start();
@@ -972,20 +884,6 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         }
         isConnected = connected;
         connectButton.setText(connected ? selectedDevice.getName() : "Connect Bluetooth");
-        /*
-        btnConnect.setText(connected ? "Отключиться" : "Подключиться");
-        btnRefresh.setEnabled(!connected);
-        devicesList.setEnabled(!connected);
-
-        motorCSlider.setEnabled(connected);
-        motorDSlider.setEnabled(connected);
-        btnMotorCForward.setEnabled(connected);
-        btnMotorCBackward.setEnabled(connected);
-        btnMotorCStop.setEnabled(connected);
-        btnMotorDForward.setEnabled(connected);
-        btnMotorDBackward.setEnabled(connected);
-        btnMotorDStop.setEnabled(connected);
-         */
     }
 
     private void disconnect() {
@@ -997,7 +895,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
             }
             runOnUiThread(() -> {
                 setConnectionState(false);
-                showToast("Отключено");
+                showToast("Disconnected");
             });
         } catch (IOException e) {
             Log.e(TAG, "Disconnect error: " + e.getMessage());
@@ -1005,113 +903,38 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
     }
 
     private void sendMotorSpeed(char port, byte speed) throws IOException {
-
         ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
-        //Записываем номер сообщения.
         writeUShort(byteArrayOutputStream, 2);
-        //Записываем тип команды (прямая команда, ответ не требуется).
         writeUByte(byteArrayOutputStream, 0x80);
-        //Записываем количество зарезервированных байт для переменных (здесь ничего не резервируется).
         writeVariablesAllocation(byteArrayOutputStream, 0, 0);
-        //Записываем код команды.
-        writeCommand(byteArrayOutputStream, 0xA5); // OUTPUT_POWER (0xA5)  OUTPUT_SPEED (0xA4).
-        //Записываем номер модуля EV3.
+        writeCommand(byteArrayOutputStream, 0xA5);
         writeParameterAsSmallByte(byteArrayOutputStream, 0);
-        //Записываем номер порта
         writeParameterAsSmallByte(byteArrayOutputStream, getPortByte(port));
-        //Записываем мощность (от -100 до 100).
         writeParameterAsByte(byteArrayOutputStream, speed);
-
-        //Отправляем сообщение на EV3.
-        //Сначала отправляем размер сообщения.
         writeUShort(outputStream, byteArrayOutputStream.size());
-        //Затем отправляем само сообщение.
         byteArrayOutputStream.writeTo(outputStream);
-
-
         byteArrayOutputStream.reset();
-
-
-        //START
-        //Записываем номер сообщения.
         writeUShort(byteArrayOutputStream, 2);
-        //Записываем тип команды (прямая команда, ответ не требуется).
         writeUByte(byteArrayOutputStream, 0x80);
-        //Записываем количество зарезервированных байт для переменных (здесь ничего не резервируется).
         writeVariablesAllocation(byteArrayOutputStream, 0, 0);
-        //Записываем код команды.
         writeCommand(byteArrayOutputStream, 0xA6);
-        //Записываем номер модуля EV3.
         writeParameterAsSmallByte(byteArrayOutputStream, 0);
-        //Записываем номер порта
         writeParameterAsSmallByte(byteArrayOutputStream, getPortByte(port));
-        //Отправляем сообщение на EV3.
-        //Сначала отправляем размер сообщения.
         writeUShort(outputStream, byteArrayOutputStream.size());
-        //Затем отправляем само сообщение.
-        byteArrayOutputStream.writeTo(outputStream);
-
-    }
-
-    private void sendMotorSpeed_tik(char port, byte speed) throws IOException {
-
-        ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
-        //Записываем номер сообщения.
-        writeUShort(byteArrayOutputStream, 2);
-        //Записываем тип команды (прямая команда, ответ не требуется).
-        writeUByte(byteArrayOutputStream, 0x80);
-        //Записываем количество зарезервированных байт для переменных (здесь ничего не резервируется).
-        writeVariablesAllocation(byteArrayOutputStream, 0, 0);
-        //Записываем код команды.
-        writeCommand(byteArrayOutputStream, 0xAE);
-        //Записываем номер модуля EV3.
-        writeParameterAsSmallByte(byteArrayOutputStream, 0);
-        //Записываем номер порта
-        writeParameterAsSmallByte(byteArrayOutputStream, getPortByte(port));
-        //Записываем мощность (от -100 до 100).
-        writeParameterAsByte(byteArrayOutputStream, speed);
-        //Записываем, сколько оборотов двигатель будет разгоняться (0 - разгоняться будет моментально).
-        writeParameterAsInteger(byteArrayOutputStream, 0);
-        //Записываем, сколько оборотов двигатель будет крутиться на полной скорости (2,5 оборота, т.е. 900 градусов).
-        writeParameterAsInteger(byteArrayOutputStream, 900);
-        //Записываем, сколько оборотов двигатель будет замедляться (0,5 оборота, т.е. 180 градусов).
-        writeParameterAsInteger(byteArrayOutputStream, 180);
-        //Записываем, нужно ли тормозить в конце (1 - тормозить, 0 - не тормозить).
-        writeParameterAsUByte(byteArrayOutputStream, 1);
-
-        //Отправляем сообщение на EV3.
-        //Сначала отправляем размер сообщения.
-        writeUShort(outputStream, byteArrayOutputStream.size());
-        //Затем отправляем само сообщение.
         byteArrayOutputStream.writeTo(outputStream);
     }
-
 
     private void sendMotorStop(char port) throws IOException {
         ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
-        //STOP
-        //Записываем номер сообщения.
         writeUShort(byteArrayOutputStream, 2);
-        //Записываем тип команды (прямая команда, ответ не требуется).
         writeUByte(byteArrayOutputStream, 0x80);
-        //Записываем количество зарезервированных байт для переменных (здесь ничего не резервируется).
         writeVariablesAllocation(byteArrayOutputStream, 0, 0);
-        //Записываем код команды.
-        writeCommand(byteArrayOutputStream, 0xA3); // OUTPUT_STOP
-        //Записываем номер модуля EV3.
+        writeCommand(byteArrayOutputStream, 0xA3);
         writeParameterAsSmallByte(byteArrayOutputStream, 0);
-        //Записываем номер порта
         writeParameterAsSmallByte(byteArrayOutputStream, getPortByte(port));
-        //Записываем, нужно ли тормозить в конце (1 - тормозить, 0 - не тормозить).
         writeParameterAsUByte(byteArrayOutputStream, 1);
-        //Отправляем сообщение на EV3.
-        //Сначала отправляем размер сообщения.
         writeUShort(outputStream, byteArrayOutputStream.size());
-        //Затем отправляем само сообщение.
         byteArrayOutputStream.writeTo(outputStream);
-
-        // ПИСК!!!
-        //outputStream.write(new byte[]{14, 0, 0, 0, -128, 0, 0, -108, 1, 2, -126, -24, 3, -126, -24, 3});
     }
 
     private byte getPortByte(char port) {
@@ -1124,65 +947,46 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         }
     }
 
-    //Записывает unsigned byte.
     private void writeUByte(OutputStream _stream, int _ubyte) throws IOException {
         _stream.write(_ubyte > Byte.MAX_VALUE ? _ubyte - 256 : _ubyte);
     }
 
-    //Записывает byte.
     private void writeByte(OutputStream _stream, byte _byte) throws IOException {
         _stream.write(_byte);
     }
 
-    //Записывает unsigned short.
     private void writeUShort(OutputStream _stream, int _ushort) throws IOException {
         writeUByte(_stream, _ushort & 0xFF);
         writeUByte(_stream, (_ushort >> 8) & 0xFF);
     }
 
-
-    //Записывает команду.
     private void writeCommand(OutputStream _stream, int opCode) throws IOException {
         writeUByte(_stream, opCode);
     }
 
-    //Записывает количество зарезервированных байт для глобальных и локальных переменных.
     private void writeVariablesAllocation(OutputStream _stream, int globalSize, int localSize) throws IOException {
         writeUByte(_stream, globalSize & 0xFF);
         writeUByte(_stream, ((globalSize >> 8) & 0x3) | ((localSize << 2) & 0xFC));
     }
 
-    //Записывает параметр с типом unsigned byte со значением в интервале 0-31 с помощью короткого формата.
     private void writeParameterAsSmallByte(OutputStream _stream, int value) throws IOException {
         if (value < 0 && value > 31)
-            throw new IllegalArgumentException("Значение должно быть в интервале от 0 до 31.");
+            throw new IllegalArgumentException("Value must be in range 0..31.");
         writeUByte(_stream, value);
     }
 
-    //Записывает параметр с типом unsigned byte.
     private void writeParameterAsUByte(OutputStream _stream, int value) throws IOException {
         if (value < 0 && value > 255)
-            throw new IllegalArgumentException("Значение должно быть в интервале от 0 до 255.");
+            throw new IllegalArgumentException("Value must be in range 0..255.");
         writeUByte(_stream, 0x81);
         writeUByte(_stream, value);
     }
 
-    //Записывает параметр с типом byte.
     private void writeParameterAsByte(OutputStream _stream, int value) throws IOException {
         if (value < Byte.MIN_VALUE && value > Byte.MAX_VALUE)
-            throw new IllegalArgumentException("Значение должно быть в интервале от "
-                    + Byte.MIN_VALUE + " до " + Byte.MAX_VALUE + ".");
+            throw new IllegalArgumentException("Value must be in range " + Byte.MIN_VALUE + " to " + Byte.MAX_VALUE + ".");
         writeUByte(_stream, 0x81);
         writeByte(_stream, (byte)value);
-    }
-
-    //Записывает параметр с типом int.
-    private void writeParameterAsInteger(OutputStream _stream, int value) throws IOException {
-        writeUByte(_stream, 0x83);
-        writeUByte(_stream, value & 0xFF);
-        writeUByte(_stream, (value >> 8) & 0xFF);
-        writeUByte(_stream, (value >> 16) & 0xFF);
-        writeUByte(_stream, (value >> 24) & 0xFF);
     }
 
     private void saveSettings() {
@@ -1190,23 +994,22 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         SharedPreferences.Editor editor = settings.edit();
 
         try{
-                speed = Integer.parseInt(speedValue.getText().toString());
-            } catch (NumberFormatException e) {
-                speed = 0;
-            }
+            speed = Integer.parseInt(speedValue.getText().toString());
+        } catch (NumberFormatException e) {
+            speed = 0;
+        }
 
         try {
-                kp = Float.parseFloat(kpValue.getText().toString());
-            } catch (NumberFormatException e) {
-                kp = 0;
-            }
+            kp = Float.parseFloat(kpValue.getText().toString());
+        } catch (NumberFormatException e) {
+            kp = 0;
+        }
 
         try {
-                kd = Float.parseFloat(kdValue.getText().toString());
-            } catch (NumberFormatException e) {
-                kd = 0;
-            }
-
+            kd = Float.parseFloat(kdValue.getText().toString());
+        } catch (NumberFormatException e) {
+            kd = 0;
+        }
 
         editor.putInt(KEY_THRESHOLD, binarizationThreshold);
         editor.putInt(KEY_TRANSPARENCY, transparencySeekBar.getProgress());
@@ -1220,26 +1023,21 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
     private void loadSettings() {
         SharedPreferences settings = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
 
-        // Порог бинаризации
         binarizationThreshold = settings.getInt(KEY_THRESHOLD, 128);
         thresholdSeekBar.setProgress(binarizationThreshold);
         thresholdValue.setText(String.valueOf(binarizationThreshold));
 
-        // Прозрачность
         int transparency = settings.getInt(KEY_TRANSPARENCY, 128);
         transparencySeekBar.setProgress(transparency);
         transparencyValue.setText(String.valueOf(transparency));
         overlayView.setBitmapAlpha(transparency);
 
-        // SPEED
         speed = settings.getInt(KEY_SPEED, 75);
         speedValue.setText(String.valueOf(speed));
 
-        // Kp
         kp = settings.getFloat(KEY_KP, 1.0f);
         kpValue.setText(String.valueOf(kp));
 
-        // Kd
         kd = settings.getFloat(KEY_KD, 0.5f);
         kdValue.setText(String.valueOf(kd));
     }
@@ -1248,17 +1046,6 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         double res = e * kp + (e - e_last) * kd;
         e_last = e;
         return res;
-    }
-
-    void AngleMotors(double Angle, int Power) throws IOException {
-        if (Angle>0)
-        {
-            sendMotorSpeed('B', (byte) (int) (Power * Math.cos(2 * Angle)));
-            sendMotorSpeed('C', (byte) Power);
-        }else{
-            sendMotorSpeed('B', (byte) Power);
-            sendMotorSpeed('C', (byte) (int) (Power * Math.cos(2 * Angle)));
-        }
     }
 
     @Override public void onSurfaceTextureSizeChanged(@NonNull SurfaceTexture surface, int width, int height) {}
