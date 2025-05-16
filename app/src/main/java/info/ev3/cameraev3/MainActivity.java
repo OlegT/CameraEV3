@@ -22,6 +22,7 @@ import android.text.Editable;
 import android.text.TextWatcher;
 import android.util.DisplayMetrics;
 import android.util.Log;
+import android.util.Range;
 import android.util.Size;
 import android.view.Surface;
 import android.view.TextureView;
@@ -119,6 +120,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
     private EditText kdValue;
     double kd = 0.5;
     double e_last = 0;
+    boolean turnRight = true;
     private boolean isConnected = false;
     private boolean isSTART = false;
     private boolean isFirst = true;
@@ -531,11 +533,25 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
 
         overlayBitmap = createBinaryMask(yData, width, height, rowStride, pixelStride);
         int[] center = findLargestDarkSpotCenter(overlayBitmap);
-        int cX = height - center[1];
-        int cY = center[0];
-        int viewCenterX = (int) (cX * scale1);
-        int viewCenterY = (int) (cY * scale2);
-        double ang = PID(cX * 2.0 / height - 1.0, kp, kd);
+        double ang = 0;
+        int viewCenterX, viewCenterY;
+        int cX, cY;
+
+        if (center[0]!=-1 && center[1]!=-1) {
+            cX = height - center[1];
+            cY = center[0];
+            viewCenterX = (int) (cX * scale1);
+            viewCenterY = (int) (cY * scale2);
+            ang = PID(cX * 2.0 / height - 1.0, kp, kd);
+            if (ang>0) turnRight = true; else turnRight = false;
+        }else{
+            cY = 0;
+            cX = 0;
+            viewCenterY = 0;
+            viewCenterX = 0;
+            if (turnRight) ang =  Math.PI/2;
+                      else ang = -Math.PI/2;
+        }
 
         if (isConnected && isSTART) {
             if (ang > 0) {
@@ -553,6 +569,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
             }
         }
 
+        double finalAng = ang;
         runOnUiThread(() -> {
             overlayView.setCenter(viewCenterX, viewCenterY);
             overlayView.setCenterRaw(cX * 176 / 144, cY * 144 / 176);
@@ -560,8 +577,8 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
             overlayView.invalidate();
             DecimalFormat df = new DecimalFormat("#.##");
             logOutput.setText(" e=" + df.format(cX * 2.0 / height - 1.0) + "\n" +
-                    "Ang=" + df.format(ang) + " Ang_=" + df.format(ang * 180 / Math.PI) + "\n" +
-                    "Speed = " + (int) (speed * Math.cos(2 * ang))
+                    "Ang=" + df.format(finalAng) + " Ang_=" + df.format(finalAng * 180 / Math.PI) + "\n" +
+                    "Speed = " + (int) (speed * Math.cos(2 * finalAng))
             );
         });
     }
@@ -590,6 +607,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         }
         int width = bitmap.getWidth();
         int height = bitmap.getHeight();
+        int minArea = width * height/1000;
         int[] pixels = new int[width * height];
         bitmap.getPixels(pixels, 0, width, 0, 0, width, height);
         boolean[][] visited = new boolean[height][width];
@@ -626,7 +644,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                             }
                         }
                     }
-                    if (currentArea > maxArea && currentArea > 0) {
+                    if (currentArea > maxArea && currentArea > minArea) {
                         maxArea = currentArea;
                         centerX = currentSumX / currentArea;
                         centerY = currentSumY / currentArea;
@@ -728,7 +746,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
             CameraManager manager = (CameraManager) getSystemService(CAMERA_SERVICE);
             CameraCharacteristics characteristics = manager.getCameraCharacteristics(selectedCameraId);
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                android.util.Range<Float> zoomRange = characteristics.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE);
+                Range<Float> zoomRange = characteristics.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE);
                 if (zoomRange != null) {
                     minZoom = zoomRange.getLower();
                     maxZoom = zoomRange.getUpper();
@@ -907,7 +925,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         }
         new Thread(() -> {
             try {
-                if (ActivityCompat.checkSelfPermission(this, android.Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
+                if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
                     showToast("NO PERMISSION!");
                     return;
                 }
