@@ -6,6 +6,7 @@ import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.ImageFormat;
+import android.graphics.Rect;
 import android.graphics.SurfaceTexture;
 import android.hardware.camera2.CameraAccessException;
 import android.hardware.camera2.CameraCaptureSession;
@@ -61,6 +62,7 @@ import android.os.HandlerThread;
 import java.nio.ByteBuffer;
 
 import android.widget.SeekBar;
+import android.widget.TextView;
 import android.widget.Toast;
 
 import android.bluetooth.BluetoothAdapter;
@@ -130,6 +132,13 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
     private int frameCount = 0;
     private float currentFps = 0;
 
+    // Zoom control variables
+    private SeekBar zoomSeekBar;
+    private TextView zoomValue;
+    private float minZoom = 1.0f;
+    private float maxZoom = 1.0f;
+    private float currentZoom = 1.0f;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -166,6 +175,24 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         speedValue = findViewById(R.id.speedValue);
         kpValue = findViewById(R.id.kpValue);
         kdValue = findViewById(R.id.kdValue);
+
+        // Zoom control
+        zoomSeekBar = findViewById(R.id.zoomSeekBar);
+        zoomValue = findViewById(R.id.zoomValue);
+        zoomSeekBar.setEnabled(false);
+        zoomValue.setText("Zoom: 1.0x");
+
+        zoomSeekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                if (!seekBar.isEnabled()) return;
+                currentZoom = minZoom + (maxZoom - minZoom) * (progress / 100f);
+                zoomValue.setText(String.format(Locale.US, "Zoom: %.2fx", currentZoom));
+                applyZoom();
+            }
+            @Override public void onStartTrackingTouch(SeekBar seekBar) {}
+            @Override public void onStopTrackingTouch(SeekBar seekBar) {}
+        });
 
         // Bluetooth initialization
         bluetoothAdapter = BluetoothAdapter.getDefaultAdapter();
@@ -211,8 +238,6 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                         cameraDevice = null;
                     }
                     selectedCameraId = cameraIds[position];
-
-                    // Update preview size for new camera
                     CameraManager manager = (CameraManager) getSystemService(CAMERA_SERVICE);
                     try {
                         CameraCharacteristics characteristics = manager.getCameraCharacteristics(selectedCameraId);
@@ -224,9 +249,9 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                     } catch (CameraAccessException e) {
                         e.printStackTrace();
                     }
-
                     openCamera();
                     checkFlashSupport();
+                    updateZoomControl();
                 }
 
                 @Override
@@ -284,7 +309,6 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                 overlayView.setBitmapAlpha(progress);
                 saveSettings();
             }
-
             @Override public void onStartTrackingTouch(SeekBar seekBar) {}
             @Override public void onStopTrackingTouch(SeekBar seekBar) {}
         });
@@ -296,7 +320,6 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                 binarizationThreshold = progress;
                 saveSettings();
             }
-
             @Override public void onStartTrackingTouch(SeekBar seekBar) {}
             @Override public void onStopTrackingTouch(SeekBar seekBar) {}
         });
@@ -331,6 +354,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
             }
         });
 
+        updateZoomControl();
     }
 
     private class GenericTextWatcher implements TextWatcher {
@@ -344,7 +368,6 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
             log("Camera " + selectedCameraId + " does not support preview");
             return;
         }
-
         CameraManager manager = (CameraManager) getSystemService(CAMERA_SERVICE);
         try {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
@@ -372,24 +395,18 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
 
     private void adjustAspectRatio() {
         if (previewSize == null) return;
-
         DisplayMetrics metrics = getResources().getDisplayMetrics();
         int screenWidth = metrics.widthPixels;
-
         float ratio = (float) previewSize.getWidth() / previewSize.getHeight();
         int previewHeight = (int) (screenWidth / ratio);
-
         scaleX = (float) screenWidth / previewSize.getWidth();
         scaleY = (float) previewHeight / previewSize.getHeight();
-
         scale1 = (float) screenWidth / previewSize.getHeight();
         scale2 = (float) previewHeight / previewSize.getWidth();
-
         ViewGroup.LayoutParams containerParams = previewContainer.getLayoutParams();
         containerParams.width = screenWidth;
         containerParams.height = previewHeight;
         previewContainer.setLayoutParams(containerParams);
-
         ViewGroup.LayoutParams tvParams = textureView.getLayoutParams();
         tvParams.width = screenWidth;
         tvParams.height = previewHeight;
@@ -403,6 +420,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
             cameraDevice = camera;
             startPreview();
             log("Camera opened");
+            updateZoomControl();
         }
 
         @Override
@@ -449,6 +467,11 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
             previewRequestBuilder.addTarget(surface);
             previewRequestBuilder.addTarget(imageReader.getSurface());
 
+            // Apply initial zoom value
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                previewRequestBuilder.set(CaptureRequest.CONTROL_ZOOM_RATIO, currentZoom);
+            }
+
             List<Surface> surfaces = Arrays.asList(surface, imageReader.getSurface());
             cameraDevice.createCaptureSession(surfaces, new CameraCaptureSession.StateCallback() {
                 @Override
@@ -462,7 +485,6 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                         log("CaptureException: " + e.getMessage());
                     }
                 }
-
                 @Override
                 public void onConfigureFailed(@NonNull CameraCaptureSession session) {
                     log("Configuration failed");
@@ -483,7 +505,6 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
-
         image.close();
     };
 
@@ -509,15 +530,11 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         image.close();
 
         overlayBitmap = createBinaryMask(yData, width, height, rowStride, pixelStride);
-
         int[] center = findLargestDarkSpotCenter(overlayBitmap);
-
         int cX = height - center[1];
         int cY = center[0];
-
         int viewCenterX = (int) (cX * scale1);
         int viewCenterY = (int) (cY * scale2);
-
         double ang = PID(cX * 2.0 / height - 1.0, kp, kd);
 
         if (isConnected && isSTART) {
@@ -551,12 +568,10 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
 
     private Bitmap createBinaryMask(byte[] yData, int width, int height, int rowStride, int pixelStride) {
         int[] pixels = new int[width * height];
-
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
                 int index = y * rowStride + x * pixelStride;
                 if (index >= yData.length) continue;
-
                 int luminance = yData[index] & 0xFF;
                 int color = (luminance < binarizationThreshold)
                         ? 0xFF000000
@@ -564,7 +579,6 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                 pixels[y * width + x] = color;
             }
         }
-
         Bitmap bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
         bitmap.setPixels(pixels, 0, width, 0, 0, width, height);
         return bitmap;
@@ -574,17 +588,14 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         if (bitmap == null) {
             return new int[]{-1, -1};
         }
-
         int width = bitmap.getWidth();
         int height = bitmap.getHeight();
         int[] pixels = new int[width * height];
         bitmap.getPixels(pixels, 0, width, 0, 0, width, height);
         boolean[][] visited = new boolean[height][width];
-
         int maxArea = 0;
         int centerX = -1;
         int centerY = -1;
-
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
                 if ((pixels[y * width + x] & 0x00FFFFFF) == 0x000000 && !visited[y][x]) {
@@ -596,7 +607,6 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                     int currentArea = 0;
                     int currentSumX = 0;
                     int currentSumY = 0;
-
                     while (!queue.isEmpty()) {
                         int[] currentPixel = queue.poll();
                         int currentX = currentPixel[0];
@@ -604,12 +614,10 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                         currentArea++;
                         currentSumX += currentX;
                         currentSumY += currentY;
-
                         int[][] neighbors = {{0, 1}, {0, -1}, {1, 0}, {-1, 0}};
                         for (int[] neighbor : neighbors) {
                             int newX = currentX + neighbor[0];
                             int newY = currentY + neighbor[1];
-
                             if (newX >= 0 && newX < width && newY >= 0 && newY < height &&
                                     (pixels[newY * width + newX] & 0x00FFFFFF) == 0x000000 && !visited[newY][newX]) {
                                 visited[newY][newX] = true;
@@ -618,7 +626,6 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                             }
                         }
                     }
-
                     if (currentArea > maxArea && currentArea > 0) {
                         maxArea = currentArea;
                         centerX = currentSumX / currentArea;
@@ -627,7 +634,6 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                 }
             }
         }
-
         if (maxArea > 0) {
             return new int[]{centerX, centerY};
         } else {
@@ -685,18 +691,15 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                     default:
                         lensFacingStr = "Unknown";
                 }
-
                 float[] focalLengths = characteristics.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS);
                 String focalStr = (focalLengths != null && focalLengths.length > 0)
                         ? String.format(Locale.US, " %.1fmm", focalLengths[0])
                         : "";
-
                 String physicalIds = "";
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                     physicalIds = characteristics.getPhysicalCameraIds().toString();
                     if (!physicalIds.isEmpty()) physicalIds = " physId=" + physicalIds;
                 }
-
                 StreamConfigurationMap map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
                 String resolution = "N/A";
                 if (map != null) {
@@ -711,13 +714,74 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                         resolution = max.getWidth() + "x" + max.getHeight();
                     }
                 }
-
                 names.add(lensFacingStr + " #" + cameraId + " (" + resolution + focalStr + physicalIds + ")");
             } catch (CameraAccessException e) {
                 names.add("Access error for #" + cameraId);
             }
         }
         return names;
+    }
+
+    // ZOOM control methods
+    private void updateZoomControl() {
+        try {
+            CameraManager manager = (CameraManager) getSystemService(CAMERA_SERVICE);
+            CameraCharacteristics characteristics = manager.getCameraCharacteristics(selectedCameraId);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                android.util.Range<Float> zoomRange = characteristics.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE);
+                if (zoomRange != null) {
+                    minZoom = zoomRange.getLower();
+                    maxZoom = zoomRange.getUpper();
+                } else {
+                    minZoom = 1.0f;
+                    maxZoom = 1.0f;
+                }
+            } else {
+                Float maxZoomObj = characteristics.get(CameraCharacteristics.SCALER_AVAILABLE_MAX_DIGITAL_ZOOM);
+                minZoom = 1.0f;
+                maxZoom = (maxZoomObj != null && maxZoomObj > 1.0f) ? maxZoomObj : 1.0f;
+            }
+            if (maxZoom > minZoom) {
+                zoomSeekBar.setEnabled(true);
+                zoomSeekBar.setVisibility(View.VISIBLE);
+                zoomValue.setVisibility(View.VISIBLE);
+                zoomSeekBar.setMax(100);
+                zoomSeekBar.setProgress(0);
+                currentZoom = minZoom;
+            } else {
+                zoomSeekBar.setEnabled(false);
+                zoomSeekBar.setVisibility(View.GONE);
+                zoomValue.setVisibility(View.GONE);
+                minZoom = maxZoom = currentZoom = 1.0f;
+            }
+            zoomValue.setText(String.format(Locale.US, "Zoom: %.2fx", currentZoom));
+        } catch (CameraAccessException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void applyZoom() {
+        if (previewRequestBuilder == null || captureSession == null) return;
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                previewRequestBuilder.set(CaptureRequest.CONTROL_ZOOM_RATIO, currentZoom);
+            } else {
+                CameraManager manager = (CameraManager) getSystemService(CAMERA_SERVICE);
+                CameraCharacteristics characteristics = manager.getCameraCharacteristics(selectedCameraId);
+                Rect sensorRect = characteristics.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE);
+                if (sensorRect != null && maxZoom > 1.0f) {
+                    int cropW = (int)(sensorRect.width() / currentZoom);
+                    int cropH = (int)(sensorRect.height() / currentZoom);
+                    int cropX = (sensorRect.width() - cropW) / 2;
+                    int cropY = (sensorRect.height() - cropH) / 2;
+                    Rect zoomRect = new Rect(cropX, cropY, cropX + cropW, cropY + cropH);
+                    previewRequestBuilder.set(CaptureRequest.SCALER_CROP_REGION, zoomRect);
+                }
+            }
+            captureSession.setRepeatingRequest(previewRequestBuilder.build(), null, null);
+        } catch (CameraAccessException e) {
+            e.printStackTrace();
+        }
     }
 
     @Override
@@ -748,7 +812,6 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
 
     private void updateFlashMode() {
         if (previewRequestBuilder == null) return;
-
         try {
             if (flashCheckbox.isChecked() && isFlashSupported) {
                 previewRequestBuilder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON);
@@ -775,12 +838,10 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                     return;
                 }
             }
-
             if (!checkBluetoothPermissions()) {
                 requestBluetoothPermissions();
                 return;
             }
-
             if (bluetoothAdapter == null || !bluetoothAdapter.isEnabled()) {
                 Intent enableBtIntent = new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE);
                 if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
@@ -790,19 +851,16 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                 startActivityForResult(enableBtIntent, REQUEST_ENABLE_BT);
                 return;
             }
-
             Set<BluetoothDevice> pairedDevices = bluetoothAdapter.getBondedDevices();
             List<BluetoothDevice> deviceList = new ArrayList<>(pairedDevices);
             String[] deviceNames = deviceList.stream()
                     .map(device -> device.getName() + "\n" + device.getAddress() + "\n------------------------------")
                     .toArray(String[]::new);
-
             new AlertDialog.Builder(this)
                     .setTitle("Select Device")
                     .setItems(deviceNames, (dialog, which) -> connectToDevice(deviceList.get(which)))
                     .setNegativeButton("Cancel", null)
                     .show();
-
         } else {
             setConnectionState(false);
             disconnect();
@@ -847,7 +905,6 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         if (selectedDevice == null) {
             return;
         }
-
         new Thread(() -> {
             try {
                 if (ActivityCompat.checkSelfPermission(this, android.Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
@@ -859,12 +916,10 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                 socket.connect();
                 outputStream = socket.getOutputStream();
                 inputStream = socket.getInputStream();
-
                 runOnUiThread(() -> {
                     setConnectionState(true);
                     showToast("Connected to " + selectedDevice.getName());
                 });
-
             } catch (IOException e) {
                 Log.e(TAG, "Connection error: " + e.getMessage());
                 runOnUiThread(() -> showToast("Connection error"));
@@ -950,38 +1005,31 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
     private void writeUByte(OutputStream _stream, int _ubyte) throws IOException {
         _stream.write(_ubyte > Byte.MAX_VALUE ? _ubyte - 256 : _ubyte);
     }
-
     private void writeByte(OutputStream _stream, byte _byte) throws IOException {
         _stream.write(_byte);
     }
-
     private void writeUShort(OutputStream _stream, int _ushort) throws IOException {
         writeUByte(_stream, _ushort & 0xFF);
         writeUByte(_stream, (_ushort >> 8) & 0xFF);
     }
-
     private void writeCommand(OutputStream _stream, int opCode) throws IOException {
         writeUByte(_stream, opCode);
     }
-
     private void writeVariablesAllocation(OutputStream _stream, int globalSize, int localSize) throws IOException {
         writeUByte(_stream, globalSize & 0xFF);
         writeUByte(_stream, ((globalSize >> 8) & 0x3) | ((localSize << 2) & 0xFC));
     }
-
     private void writeParameterAsSmallByte(OutputStream _stream, int value) throws IOException {
         if (value < 0 && value > 31)
             throw new IllegalArgumentException("Value must be in range 0..31.");
         writeUByte(_stream, value);
     }
-
     private void writeParameterAsUByte(OutputStream _stream, int value) throws IOException {
         if (value < 0 && value > 255)
             throw new IllegalArgumentException("Value must be in range 0..255.");
         writeUByte(_stream, 0x81);
         writeUByte(_stream, value);
     }
-
     private void writeParameterAsByte(OutputStream _stream, int value) throws IOException {
         if (value < Byte.MIN_VALUE && value > Byte.MAX_VALUE)
             throw new IllegalArgumentException("Value must be in range " + Byte.MIN_VALUE + " to " + Byte.MAX_VALUE + ".");
@@ -992,52 +1040,42 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
     private void saveSettings() {
         SharedPreferences settings = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
         SharedPreferences.Editor editor = settings.edit();
-
         try{
             speed = Integer.parseInt(speedValue.getText().toString());
         } catch (NumberFormatException e) {
             speed = 0;
         }
-
         try {
             kp = Float.parseFloat(kpValue.getText().toString());
         } catch (NumberFormatException e) {
             kp = 0;
         }
-
         try {
             kd = Float.parseFloat(kdValue.getText().toString());
         } catch (NumberFormatException e) {
             kd = 0;
         }
-
         editor.putInt(KEY_THRESHOLD, binarizationThreshold);
         editor.putInt(KEY_TRANSPARENCY, transparencySeekBar.getProgress());
         editor.putInt(KEY_SPEED, speed);
         editor.putFloat(KEY_KP, (float)kp);
         editor.putFloat(KEY_KD, (float)kd);
-
         editor.apply();
     }
 
     private void loadSettings() {
         SharedPreferences settings = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
-
         binarizationThreshold = settings.getInt(KEY_THRESHOLD, 128);
         thresholdSeekBar.setProgress(binarizationThreshold);
         thresholdValue.setText(String.valueOf(binarizationThreshold));
-
         int transparency = settings.getInt(KEY_TRANSPARENCY, 128);
         transparencySeekBar.setProgress(transparency);
         transparencyValue.setText(String.valueOf(transparency));
         overlayView.setBitmapAlpha(transparency);
-
         speed = settings.getInt(KEY_SPEED, 75);
         speedValue.setText(String.valueOf(speed));
-
         kp = settings.getFloat(KEY_KP, 1.0f);
         kpValue.setText(String.valueOf(kp));
-
         kd = settings.getFloat(KEY_KD, 0.5f);
         kdValue.setText(String.valueOf(kd));
     }
