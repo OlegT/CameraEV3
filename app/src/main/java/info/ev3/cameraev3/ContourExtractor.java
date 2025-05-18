@@ -19,7 +19,7 @@ public class ContourExtractor {
             {-2, 1}, {-2, -1}, {1, 1}, {1, -1}, {-1, 1}, {-1, -1}
     };
 
-    private static boolean isBlack(int pixel) {
+    static boolean isBlack(int pixel) {
         return (pixel & 0x00FFFFFF) == 0x000000;
     }
 
@@ -37,16 +37,10 @@ public class ContourExtractor {
     private static boolean pointsAreClose(Point p1, Point p2) {
         return Math.abs(p1.x - p2.x) <= 5 && Math.abs(p1.y - p2.y) <= 5;
     }
-
-    public static List<List<Point>> extractContours(Bitmap bitmap) {
-        int width = bitmap.getWidth(), height = bitmap.getHeight();
+    public static List<List<Point>> extractContours(boolean[][] black) {
+        int height = black.length;
+        int width = black[0].length;
         boolean[][] used = new boolean[height][width];
-        boolean[][] black = new boolean[height][width];
-        for (int y = 0; y < height; y++) {
-            for (int x = 0; x < width; x++) {
-                black[y][x] = isBlack(bitmap.getPixel(x, y));
-            }
-        }
         double minArea = width * height * 0.001; // 1% от общей площади
 
         // Список открытых (пока не замкнутых) ломаных

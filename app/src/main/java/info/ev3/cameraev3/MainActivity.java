@@ -33,6 +33,7 @@ import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.CheckBox;
+import android.widget.CompoundButton;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.Spinner;
@@ -133,9 +134,14 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
     private static final String KEY_SPEED = "speed";
     private static final String KEY_KP = "kp";
     private static final String KEY_KD = "kd";
+    private static final String KEY_INVERSE = "inverse";
+    private static final String KEY_FILTER = "filter";
     private long lastFpsUpdateTime = 0;
     private int frameCount = 0;
     private float currentFps = 0;
+
+    private CheckBox inverseCheckbox;
+    private CheckBox filterCheckbox;
 
     // Zoom control variables
     private SeekBar zoomSeekBar;
@@ -147,6 +153,11 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
             {1, 0}, {1, 1}, {0, 1}, {-1, 1},
             {-1, 0}, {-1, -1}, {0, -1}, {1, -1}
     };
+
+    private CompoundButton.OnCheckedChangeListener inverseListener = (buttonView, isChecked) -> saveSettings();
+    private CompoundButton.OnCheckedChangeListener filterListener = (buttonView, isChecked) -> saveSettings();
+
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -183,6 +194,8 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         speedValue = findViewById(R.id.speedValue);
         kpValue = findViewById(R.id.kpValue);
         kdValue = findViewById(R.id.kdValue);
+        inverseCheckbox = findViewById(R.id.inverseCheckbox);
+        filterCheckbox = findViewById(R.id.filterCheckbox);
 
         // Zoom control
         zoomSeekBar = findViewById(R.id.zoomSeekBar);
@@ -538,10 +551,27 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         image.close();
 
         overlayBitmap = createBinaryMask(yData, width, height, rowStride, pixelStride);
-        overlayBitmap = removeSmallIslands(overlayBitmap);
-        List<List<Point>> contours = ContourExtractor.extractContours(overlayBitmap);
+        if (filterCheckbox.isChecked()) {
+            //overlayBitmap = removeSmallIslands(overlayBitmap);
+            overlayBitmap = removeIslands3x3(overlayBitmap);
+        }
 
-        int[] center = findLargestDarkSpotCenter(overlayBitmap);
+        boolean inv = inverseCheckbox.isChecked();
+        boolean[][] black = new boolean[height][width];
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                if (inv) {
+                    black[y][x] = !ContourExtractor.isBlack(overlayBitmap.getPixel(x, y));
+                }else{
+                    black[y][x] = ContourExtractor.isBlack(overlayBitmap.getPixel(x, y));
+                }
+            }
+        }
+
+        List<List<Point>> contours = ContourExtractor.extractContours(black);
+
+
+        int[] center = findLargestDarkSpotCenter(black);
         double ang = 0;
         int viewCenterX, viewCenterY;
         int cX, cY;
@@ -691,28 +721,68 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         return out;
     }
 
-
-    private int[] findLargestDarkSpotCenter(Bitmap bitmap) {
-        if (bitmap == null) {
-            return new int[]{-1, -1};
-        }
-        int width = bitmap.getWidth();
-        int height = bitmap.getHeight();
-        int minArea = width * height/1000;
+    public static Bitmap removeIslands3x3(Bitmap bitmap) {
+        int width = bitmap.getWidth(), height = bitmap.getHeight();
         int[] pixels = new int[width * height];
         bitmap.getPixels(pixels, 0, width, 0, 0, width, height);
+        int[] result = pixels.clone();
+
+        // Перебираем внутренние точки, чтобы не выходить за границы (x: 1 .. width-4, y: 1 .. height-4)
+        for (int y = 1; y < height - 3; y++) {
+            for (int x = 1; x < width - 3; x++) {
+                // 1. Получить цвет периметра
+                int borderColor = -1;
+                boolean borderConsistent = true;
+                // Проверяем всю рамку 5x5 кроме внутреннего 3x3
+                for (int dy = -1; dy <= 3 && borderConsistent; dy++) {
+                    for (int dx = -1; dx <= 3 && borderConsistent; dx++) {
+                        if (dx >= 0 && dx <= 2 && dy >= 0 && dy <= 2) continue; // skip inner 3x3
+                        int nx = x + dx, ny = y + dy;
+                        int idx = ny * width + nx;
+                        int color = pixels[idx] & 0x00FFFFFF;
+                        if (borderColor == -1) {
+                            borderColor = color;
+                        } else if (borderColor != color) {
+                            borderConsistent = false;
+                        }
+                    }
+                }
+                if (!borderConsistent) continue;
+
+                // 2. Если весь периметр одного цвета — залить внутренний 3x3 этим цветом
+                int fillColor = (borderColor == 0x000000) ? 0xFF000000 : 0xFFFFFFFF;
+                for (int dy = 0; dy < 3; dy++) {
+                    int yw = (y + dy) * width;
+                    for (int dx = 0; dx < 3; dx++) {
+                        result[yw + (x + dx)] = fillColor;
+                    }
+                }
+            }
+        }
+
+        Bitmap out = Bitmap.createBitmap(width, height, bitmap.getConfig());
+        out.setPixels(result, 0, width, 0, 0, width, height);
+        return out;
+    }
+
+    private int[] findLargestDarkSpotCenter(boolean[][] black) {
+        if (black == null || black.length == 0 || black[0].length == 0) {
+            return new int[]{-1, -1};
+        }
+        int height = black.length;
+        int width = black[0].length;
+        int minArea = width * height / 1000;
         boolean[][] visited = new boolean[height][width];
         int maxArea = 0;
         int centerX = -1;
         int centerY = -1;
+
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
-                if ((pixels[y * width + x] & 0x00FFFFFF) == 0x000000 && !visited[y][x]) {
-                    List<int[]> currentSpotPixels = new ArrayList<>();
+                if (black[y][x] && !visited[y][x]) {
                     Queue<int[]> queue = new LinkedList<>();
                     queue.offer(new int[]{x, y});
                     visited[y][x] = true;
-                    currentSpotPixels.add(new int[]{x, y});
                     int currentArea = 0;
                     int currentSumX = 0;
                     int currentSumY = 0;
@@ -728,10 +798,9 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                             int newX = currentX + neighbor[0];
                             int newY = currentY + neighbor[1];
                             if (newX >= 0 && newX < width && newY >= 0 && newY < height &&
-                                    (pixels[newY * width + newX] & 0x00FFFFFF) == 0x000000 && !visited[newY][newX]) {
+                                    black[newY][newX] && !visited[newY][newX]) {
                                 visited[newY][newX] = true;
                                 queue.offer(new int[]{newX, newY});
-                                currentSpotPixels.add(new int[]{newX, newY});
                             }
                         }
                     }
@@ -1169,6 +1238,8 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         editor.putInt(KEY_SPEED, speed);
         editor.putFloat(KEY_KP, (float)kp);
         editor.putFloat(KEY_KD, (float)kd);
+        editor.putBoolean(KEY_INVERSE, inverseCheckbox.isChecked());
+        editor.putBoolean(KEY_FILTER, filterCheckbox.isChecked());
         editor.apply();
     }
 
@@ -1187,6 +1258,15 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         kpValue.setText(String.valueOf(kp));
         kd = settings.getFloat(KEY_KD, 0.5f);
         kdValue.setText(String.valueOf(kd));
+
+        boolean inverse = settings.getBoolean(KEY_INVERSE, false);
+        boolean filter = settings.getBoolean(KEY_FILTER, false);
+        inverseCheckbox.setOnCheckedChangeListener(null);
+        filterCheckbox.setOnCheckedChangeListener(null);
+        inverseCheckbox.setChecked(inverse);
+        filterCheckbox.setChecked(filter);
+        inverseCheckbox.setOnCheckedChangeListener(inverseListener);
+        filterCheckbox.setOnCheckedChangeListener(filterListener);
     }
 
     double PID(double e, double kp, double kd){
