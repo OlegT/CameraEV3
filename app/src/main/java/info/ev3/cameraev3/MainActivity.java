@@ -71,6 +71,9 @@ import android.bluetooth.BluetoothDevice;
 import android.content.Intent;
 import androidx.appcompat.app.AlertDialog;
 
+import android.graphics.Point;
+
+
 public class MainActivity extends AppCompatActivity implements TextureView.SurfaceTextureListener {
     private static final String TAG = "EV3Controller";
     private static final UUID EV3_UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB");
@@ -140,7 +143,10 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
     private float minZoom = 1.0f;
     private float maxZoom = 1.0f;
     private float currentZoom = 1.0f;
-
+    private static final int[][] DIRS8 = {
+            {1, 0}, {1, 1}, {0, 1}, {-1, 1},
+            {-1, 0}, {-1, -1}, {0, -1}, {1, -1}
+    };
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -532,6 +538,9 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         image.close();
 
         overlayBitmap = createBinaryMask(yData, width, height, rowStride, pixelStride);
+        overlayBitmap = removeSmallIslands(overlayBitmap);
+        List<List<Point>> contours = ContourExtractor.extractContours(overlayBitmap);
+
         int[] center = findLargestDarkSpotCenter(overlayBitmap);
         double ang = 0;
         int viewCenterX, viewCenterY;
@@ -574,11 +583,13 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
             overlayView.setCenter(viewCenterX, viewCenterY);
             overlayView.setCenterRaw(cX * 176 / 144, cY * 144 / 176);
             overlayView.setOverlayBitmap(overlayBitmap);
+            overlayView.setContours(contours, overlayBitmap.getWidth(), overlayBitmap.getHeight());
             overlayView.invalidate();
             DecimalFormat df = new DecimalFormat("#.##");
             logOutput.setText(" e=" + df.format(cX * 2.0 / height - 1.0) + "\n" +
                     "Ang=" + df.format(finalAng) + " Ang_=" + df.format(finalAng * 180 / Math.PI) + "\n" +
-                    "Speed = " + (int) (speed * Math.cos(2 * finalAng))
+                    "Speed = " + (int) (speed * Math.cos(2 * finalAng))+"\n"+
+                    "Count ="+ contours.size()
             );
         });
     }
@@ -600,6 +611,86 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         bitmap.setPixels(pixels, 0, width, 0, 0, width, height);
         return bitmap;
     }
+
+    public static Bitmap removeSmallIslands(Bitmap bitmap) {
+        int width = bitmap.getWidth(), height = bitmap.getHeight();
+        int[] pixels = new int[width * height];
+        bitmap.getPixels(pixels, 0, width, 0, 0, width, height);
+        int[] result = pixels.clone();
+
+        // 1. Удаление одиночных пикселей
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                int idx = y * width + x;
+                int pixel = pixels[idx];
+                boolean isBlack = (pixel & 0x00FFFFFF) == 0x000000;
+                boolean hasNeighborSame = false;
+                for (int[] d : DIRS8) {
+                    int nx = x + d[0], ny = y + d[1];
+                    if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
+                    int nPixel = pixels[ny * width + nx];
+                    boolean neighborIsBlack = (nPixel & 0x00FFFFFF) == 0x000000;
+                    if (neighborIsBlack == isBlack) {
+                        hasNeighborSame = true;
+                        break;
+                    }
+                }
+                if (!hasNeighborSame) {
+                    result[idx] = isBlack ? 0xFFFFFFFF : 0xFF000000;
+                }
+            }
+        }
+
+        // 2. Удаление 2x2 островков
+        for (int y = 0; y < height - 1; y++) {
+            for (int x = 0; x < width - 1; x++) {
+                int idx00 = y * width + x;
+                int idx01 = (y + 1) * width + x;
+                int idx10 = y * width + (x + 1);
+                int idx11 = (y + 1) * width + (x + 1);
+
+                int p00 = result[idx00], p01 = result[idx01], p10 = result[idx10], p11 = result[idx11];
+                boolean blockIsBlack = ((p00 & 0x00FFFFFF) == 0x000000) &&
+                        ((p01 & 0x00FFFFFF) == 0x000000) &&
+                        ((p10 & 0x00FFFFFF) == 0x000000) &&
+                        ((p11 & 0x00FFFFFF) == 0x000000);
+                boolean blockIsWhite = ((p00 & 0x00FFFFFF) != 0x000000) &&
+                        ((p01 & 0x00FFFFFF) != 0x000000) &&
+                        ((p10 & 0x00FFFFFF) != 0x000000) &&
+                        ((p11 & 0x00FFFFFF) != 0x000000);
+
+                if (blockIsBlack || blockIsWhite) {
+                    // Проверим окружение блока
+                    boolean surrounded = true;
+                    for (int dy = -1; dy <= 2 && surrounded; dy++) {
+                        for (int dx = -1; dx <= 2 && surrounded; dx++) {
+                            // Только по периметру
+                            if (dx == -1 || dx == 2 || dy == -1 || dy == 2) {
+                                int nx = x + dx, ny = y + dy;
+                                if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
+                                int nPixel = result[ny * width + nx];
+                                boolean neighborIsBlack = (nPixel & 0x00FFFFFF) == 0x000000;
+                                if (blockIsBlack && neighborIsBlack) surrounded = false;
+                                if (blockIsWhite && !neighborIsBlack) surrounded = false;
+                            }
+                        }
+                    }
+                    if (surrounded) {
+                        int fillColor = blockIsBlack ? 0xFFFFFFFF : 0xFF000000;
+                        result[idx00] = fillColor;
+                        result[idx01] = fillColor;
+                        result[idx10] = fillColor;
+                        result[idx11] = fillColor;
+                    }
+                }
+            }
+        }
+
+        Bitmap out = Bitmap.createBitmap(width, height, bitmap.getConfig());
+        out.setPixels(result, 0, width, 0, 0, width, height);
+        return out;
+    }
+
 
     private int[] findLargestDarkSpotCenter(Bitmap bitmap) {
         if (bitmap == null) {

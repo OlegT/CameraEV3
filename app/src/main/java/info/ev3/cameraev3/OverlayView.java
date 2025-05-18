@@ -6,8 +6,13 @@ import android.graphics.Canvas;
 import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.Rect;
+import android.graphics.Point;
 import android.util.AttributeSet;
 import android.view.View;
+
+import java.util.ArrayList;
+import java.util.List;
+
 
 public class OverlayView extends View {
     private Paint paint;
@@ -22,6 +27,10 @@ public class OverlayView extends View {
     private Paint bitmapPaint;
     private float fps = 0;
     private Paint fpsPaint;
+
+    private List<List<Point>> contours = new ArrayList<>();
+    private int bitmapWidth, bitmapHeight;
+    private Paint contourPaint;
 
     public OverlayView(Context context, AttributeSet attrs) {
         super(context, attrs);
@@ -51,6 +60,20 @@ public class OverlayView extends View {
         fpsPaint.setTextSize(50);
         fpsPaint.setTextAlign(Paint.Align.RIGHT);
         fpsPaint.setAntiAlias(true);
+
+        // Paint для контуров
+        contourPaint = new Paint();
+        contourPaint.setColor(0xFF00FF00); // Зеленый цвет
+        contourPaint.setStyle(Paint.Style.STROKE);
+        contourPaint.setStrokeWidth(3);
+        contourPaint.setAntiAlias(true);
+    }
+
+    public void setContours(List<List<Point>> contours, int bitmapWidth, int bitmapHeight) {
+        this.contours = contours;
+        this.bitmapWidth = bitmapWidth;
+        this.bitmapHeight = bitmapHeight;
+        invalidate();
     }
 
     public void setBitmapAlpha(int alpha) {
@@ -118,6 +141,45 @@ public class OverlayView extends View {
             canvas.drawLine(centerX - 30, centerY, centerX + 30, centerY, centerPaint);
             canvas.drawLine(centerX, centerY - 30, centerX, centerY + 30, centerPaint);
         }
+
+        // Отрисовка контуров
+        if (bitmapWidth > 0 && bitmapHeight > 0) {
+            float scaleX = getWidth() / (float) bitmapHeight;
+            float scaleY = getHeight() / (float) bitmapWidth;
+
+            for (List<Point> contour : contours) {
+                if (contour.size() < 2) continue;
+
+                android.graphics.Path path = new android.graphics.Path();
+                Point first = contour.get(0);
+
+                /*
+                cX = height - center[1];
+                cY = center[0];
+                viewCenterX = (int) (cX * scale1);
+                viewCenterY = (int) (cY * scale2);
+                 */
+
+                float x = (bitmapHeight - first.y) * scaleX;
+                float y = first.x * scaleY;
+
+                //float x = first.y * scaleX;
+                //float y = (bitmapWidth - first.x - 1) * scaleY;
+                path.moveTo(x, y);
+
+                for (int i = 1; i < contour.size(); i++) {
+                    Point p = contour.get(i);
+                    //x = p.y * scaleX;
+                    //y = (bitmapWidth - p.x - 1) * scaleY;
+                    x = (bitmapHeight - p.y) * scaleX;
+                    y = p.x * scaleY;
+
+                    path.lineTo(x, y);
+                }
+                canvas.drawPath(path, contourPaint);
+            }
+        }
+
 
         if (fps > 0) {
             String fpsText = String.format("%.1f FPS", fps);
