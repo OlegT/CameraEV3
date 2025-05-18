@@ -220,4 +220,139 @@ public class ContourExtractor {
         }
         return Math.abs(area) / 2.0;
     }
+
+
+
+    public static List<List<Point>> findConvexQuadrilaterals(List<List<Point>> contours, double epsilon) {
+        List<List<Point>> quads = new ArrayList<>();
+        for (List<Point> contour : contours) {
+            if (contour == null || contour.size() < 3) continue;
+            List<Point> simplified = approxPolyDP(contour, epsilon);
+            simplified = removeClosePoints(simplified, 4);
+
+            // Гарантируем замкнутость
+            if (simplified.size() > 1 && !simplified.get(0).equals(simplified.get(simplified.size() - 1))) {
+                simplified.add(new Point(simplified.get(0).x, simplified.get(0).y));
+            }
+
+            // Проверяем, что это четырёхугольник (замкнутый, 5 точек)
+            if (simplified.size() == 5) {
+                // Проверяем выпуклость
+                if (isConvex(simplified)) {
+                    quads.add(simplified);
+                }
+            }
+        }
+        return quads;
+    }
+
+    public static List<Point> removeClosePoints(List<Point> poly, double minDist) {
+        if (poly == null || poly.size() < 2) return poly;
+        List<Point> result = new ArrayList<>();
+        result.add(poly.get(0));
+        for (int i = 1; i < poly.size(); i++) {
+            Point prev = result.get(result.size() - 1);
+            Point curr = poly.get(i);
+            if (distance(prev, curr) >= minDist) {
+                result.add(curr);
+            }
+        }
+        // Проверяем первую и последнюю, чтобы не было "слипания" после замыкания
+        if (result.size() > 2 && distance(result.get(0), result.get(result.size() - 1)) < minDist) {
+            result.remove(result.size() - 1);
+        }
+        return result;
+    }
+
+    private static double distance(Point a, Point b) {
+        int dx = a.x - b.x, dy = a.y - b.y;
+        return Math.hypot(dx, dy);
+    }
+
+    // Проверка выпуклости для замкнутого четырехугольника
+    public static boolean isConvex(List<Point> poly) {
+        int n = poly.size() - 1; // замкнутый: последняя = первая
+        if (n != 4) return false;
+        boolean gotNegative = false;
+        boolean gotPositive = false;
+        for (int i = 0; i < n; i++) {
+            int dx1 = poly.get((i + 1) % n).x - poly.get(i).x;
+            int dy1 = poly.get((i + 1) % n).y - poly.get(i).y;
+            int dx2 = poly.get((i + 2) % n).x - poly.get((i + 1) % n).x;
+            int dy2 = poly.get((i + 2) % n).y - poly.get((i + 1) % n).y;
+            int cross = dx1 * dy2 - dy1 * dx2;
+            if (cross < 0) gotNegative = true;
+            if (cross > 0) gotPositive = true;
+            if (gotNegative && gotPositive) return false; // невыпуклый
+        }
+        return true;
+    }
+
+    public static List<List<Point>> simplifyContours(List<List<Point>> contours, double epsilon) {
+        List<List<Point>> simplifiedContours = new ArrayList<>();
+        for (List<Point> contour : contours) {
+            if (contour == null || contour.size() < 3) continue;
+            List<Point> simplified = approxPolyDP(contour, epsilon);
+            // Гарантируем замкнутость (первая == последней)
+            if (simplified.size() > 1 && !simplified.get(0).equals(simplified.get(simplified.size() - 1))) {
+                simplified.add(new Point(simplified.get(0).x, simplified.get(0).y));
+            }
+            simplifiedContours.add(simplified);
+        }
+        return simplifiedContours;
+    }
+
+    // Реализация approxPolyDP
+    public static List<Point> approxPolyDP(List<Point> points, double epsilon) {
+        if (points.size() < 3) return new ArrayList<>(points);
+        boolean closed = points.get(0).equals(points.get(points.size() - 1));
+        List<Point> input = closed ? points.subList(0, points.size() - 1) : points;
+        List<Point> out = new ArrayList<>();
+        rdpRecursive(input, 0, input.size() - 1, epsilon * epsilon, out);
+        out.add(input.get(input.size() - 1));
+        if (closed) out.add(input.get(0));
+        return out;
+    }
+
+    private static void rdpRecursive(List<Point> pts, int first, int last, double sqEps, List<Point> out) {
+        if (last <= first + 1) {
+            out.add(pts.get(first));
+            return;
+        }
+        double maxDist = 0;
+        int index = -1;
+        Point A = pts.get(first), B = pts.get(last);
+        for (int i = first + 1; i < last; i++) {
+            double d = perpendicularSqDistance(pts.get(i), A, B);
+            if (d > maxDist) {
+                maxDist = d;
+                index = i;
+            }
+        }
+        if (maxDist > sqEps) {
+            rdpRecursive(pts, first, index, sqEps, out);
+            rdpRecursive(pts, index, last, sqEps, out);
+        } else {
+            out.add(pts.get(first));
+        }
+    }
+
+    private static double perpendicularSqDistance(Point p, Point a, Point b) {
+        double dx = b.x - a.x, dy = b.y - a.y;
+        double px = p.x - a.x, py = p.y - a.y;
+        double dot = dx * px + dy * py;
+        double lenSq = dx * dx + dy * dy;
+        double param = lenSq != 0 ? dot / lenSq : -1;
+        double xx, yy;
+        if (param < 0) {
+            xx = a.x; yy = a.y;
+        } else if (param > 1) {
+            xx = b.x; yy = b.y;
+        } else {
+            xx = a.x + param * dx;
+            yy = a.y + param * dy;
+        }
+        double dx1 = p.x - xx, dy1 = p.y - yy;
+        return dx1 * dx1 + dy1 * dy1;
+    }
 }

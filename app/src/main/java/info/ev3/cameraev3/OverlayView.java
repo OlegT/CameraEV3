@@ -3,6 +3,7 @@ package info.ev3.cameraev3;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
+import android.graphics.DashPathEffect;
 import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.Rect;
@@ -29,8 +30,10 @@ public class OverlayView extends View {
     private Paint fpsPaint;
 
     private List<List<Point>> contours = new ArrayList<>();
+    private List<List<Point>> contours4 = new ArrayList<>();
     private int bitmapWidth, bitmapHeight;
     private Paint contourPaint;
+    private Paint contourPaint4;
 
     public OverlayView(Context context, AttributeSet attrs) {
         super(context, attrs);
@@ -43,6 +46,7 @@ public class OverlayView extends View {
         paint = new Paint();
         paint.setColor(0xFF0000FF);
         paint.setStrokeWidth(5);
+        paint.setPathEffect(new DashPathEffect(new float[]{15, 10}, 0));
 
         // Paint for text
         textPaint = new Paint();
@@ -67,12 +71,24 @@ public class OverlayView extends View {
         contourPaint.setStyle(Paint.Style.STROKE);
         contourPaint.setStrokeWidth(3);
         contourPaint.setAntiAlias(true);
+
+        // Paint для четырехугольноков
+        contourPaint4 = new Paint();
+        contourPaint4.setColor(0xFF651FFF); // Синий цвет
+        contourPaint4.setStyle(Paint.Style.STROKE);
+        contourPaint4.setStrokeWidth(10);
+        contourPaint4.setAntiAlias(true);
     }
 
     public void setContours(List<List<Point>> contours, int bitmapWidth, int bitmapHeight) {
         this.contours = contours;
         this.bitmapWidth = bitmapWidth;
         this.bitmapHeight = bitmapHeight;
+        invalidate();
+    }
+
+    public void setContours4(List<List<Point>> contours) {
+        this.contours4 = contours;
         invalidate();
     }
 
@@ -153,24 +169,13 @@ public class OverlayView extends View {
                 android.graphics.Path path = new android.graphics.Path();
                 Point first = contour.get(0);
 
-                /*
-                cX = height - center[1];
-                cY = center[0];
-                viewCenterX = (int) (cX * scale1);
-                viewCenterY = (int) (cY * scale2);
-                 */
-
                 float x = (bitmapHeight - first.y) * scaleX;
                 float y = first.x * scaleY;
 
-                //float x = first.y * scaleX;
-                //float y = (bitmapWidth - first.x - 1) * scaleY;
                 path.moveTo(x, y);
 
                 for (int i = 1; i < contour.size(); i++) {
                     Point p = contour.get(i);
-                    //x = p.y * scaleX;
-                    //y = (bitmapWidth - p.x - 1) * scaleY;
                     x = (bitmapHeight - p.y) * scaleX;
                     y = p.x * scaleY;
 
@@ -180,6 +185,32 @@ public class OverlayView extends View {
             }
         }
 
+        // Отрисовка четырехугольников
+        if (bitmapWidth > 0 && bitmapHeight > 0) {
+            float scaleX = getWidth() / (float) bitmapHeight;
+            float scaleY = getHeight() / (float) bitmapWidth;
+
+            for (List<Point> contour : contours4) {
+                if (contour.size() < 2) continue;
+
+                android.graphics.Path path = new android.graphics.Path();
+                Point first = contour.get(0);
+
+                float x = (bitmapHeight - first.y) * scaleX;
+                float y = first.x * scaleY;
+
+                path.moveTo(x, y);
+
+                for (int i = 1; i < contour.size(); i++) {
+                    Point p = contour.get(i);
+                    x = (bitmapHeight - p.y) * scaleX;
+                    y = p.x * scaleY;
+
+                    path.lineTo(x, y);
+                }
+                canvas.drawPath(path, contourPaint4);
+            }
+        }
 
         if (fps > 0) {
             String fpsText = String.format("%.1f FPS", fps);

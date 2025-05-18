@@ -1,11 +1,15 @@
 package info.ev3.cameraev3;
 
 import android.Manifest;
+import android.bluetooth.BluetoothAdapter;
+import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothSocket;
+import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.ImageFormat;
+import android.graphics.Point;
 import android.graphics.Rect;
 import android.graphics.SurfaceTexture;
 import android.hardware.camera2.CameraAccessException;
@@ -15,8 +19,12 @@ import android.hardware.camera2.CameraDevice;
 import android.hardware.camera2.CameraManager;
 import android.hardware.camera2.CaptureRequest;
 import android.hardware.camera2.params.StreamConfigurationMap;
+import android.media.Image;
+import android.media.ImageReader;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.HandlerThread;
 import android.os.Looper;
 import android.text.Editable;
 import android.text.TextWatcher;
@@ -36,9 +44,13 @@ import android.widget.CheckBox;
 import android.widget.CompoundButton;
 import android.widget.EditText;
 import android.widget.FrameLayout;
+import android.widget.SeekBar;
 import android.widget.Spinner;
+import android.widget.TextView;
+import android.widget.Toast;
 
 import androidx.annotation.NonNull;
+import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
@@ -47,6 +59,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.nio.ByteBuffer;
 import java.text.DecimalFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -57,28 +70,32 @@ import java.util.Queue;
 import java.util.Set;
 import java.util.UUID;
 
-import android.media.Image;
-import android.media.ImageReader;
-import android.os.Handler;
-import android.os.HandlerThread;
-import java.nio.ByteBuffer;
-
-import android.widget.SeekBar;
-import android.widget.TextView;
-import android.widget.Toast;
-
-import android.bluetooth.BluetoothAdapter;
-import android.bluetooth.BluetoothDevice;
-import android.content.Intent;
-import androidx.appcompat.app.AlertDialog;
-
-import android.graphics.Point;
-
 
 public class MainActivity extends AppCompatActivity implements TextureView.SurfaceTextureListener {
+
     private static final String TAG = "EV3Controller";
     private static final UUID EV3_UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB");
     private static final int REQUEST_CAMERA_PERMISSION = 200;
+    private static final int REQUEST_ENABLE_BT = 1;
+    private static final int REQUEST_BLUETOOTH_PERMISSIONS = 201;
+    private static final int BINARIZATION_THRESHOLD = 128;
+
+    private static final String PREFS_NAME = "AppSettings";
+    private static final String KEY_THRESHOLD = "threshold";
+    private static final String KEY_TRANSPARENCY = "transparency";
+    private static final String KEY_SPEED = "speed";
+    private static final String KEY_KP = "kp";
+    private static final String KEY_KD = "kd";
+    private static final String KEY_INVERSE = "inverse";
+    private static final String KEY_FILTER = "filter";
+
+    private static final int[][] DIRS8 = {
+            {1, 0}, {1, 1}, {0, 1}, {-1, 1},
+            {-1, 0}, {-1, -1}, {0, -1}, {1, -1}
+    };
+
+
+
     private TextureView textureView;
     private OverlayView overlayView;
     private CameraDevice cameraDevice;
@@ -98,7 +115,6 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
     private float scaleY = 1.0f;
     private float scale1 = 1.0f;
     private float scale2 = 1.0f;
-    private static final int BINARIZATION_THRESHOLD = 128;
     private Bitmap overlayBitmap;
     private SeekBar transparencySeekBar;
     private SeekBar thresholdSeekBar;
@@ -107,8 +123,8 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
     private CheckBox flashCheckbox;
     private boolean isFlashSupported = false;
     private volatile int binarizationThreshold = 128;
-    private static final int REQUEST_ENABLE_BT = 1;
-    private static final int REQUEST_BLUETOOTH_PERMISSIONS = 201;
+
+    // Bluetooth
     private BluetoothAdapter bluetoothAdapter;
     private BluetoothSocket socket;
     private OutputStream outputStream;
@@ -117,46 +133,40 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
     private ArrayList<BluetoothDevice> ev3Devices = new ArrayList<>();
     private BluetoothDevice selectedDevice;
     private Button connectButton;
+
+    // PID
     private EditText speedValue;
-    int speed = 75;
+    private int speed = 75;
     private EditText kpValue;
-    double kp = 1.0;
+    private double kp = 1.0;
     private EditText kdValue;
-    double kd = 0.5;
-    double e_last = 0;
-    boolean turnRight = true;
+    private double kd = 0.5;
+    private double e_last = 0;
+    private boolean turnRight = true;
     private boolean isConnected = false;
     private boolean isSTART = false;
     private boolean isFirst = true;
-    private static final String PREFS_NAME = "AppSettings";
-    private static final String KEY_THRESHOLD = "threshold";
-    private static final String KEY_TRANSPARENCY = "transparency";
-    private static final String KEY_SPEED = "speed";
-    private static final String KEY_KP = "kp";
-    private static final String KEY_KD = "kd";
-    private static final String KEY_INVERSE = "inverse";
-    private static final String KEY_FILTER = "filter";
+
+    // FPS
     private long lastFpsUpdateTime = 0;
     private int frameCount = 0;
     private float currentFps = 0;
 
+    // Checkboxes
     private CheckBox inverseCheckbox;
     private CheckBox filterCheckbox;
 
-    // Zoom control variables
+    // Zoom
     private SeekBar zoomSeekBar;
     private TextView zoomValue;
     private float minZoom = 1.0f;
     private float maxZoom = 1.0f;
     private float currentZoom = 1.0f;
-    private static final int[][] DIRS8 = {
-            {1, 0}, {1, 1}, {0, 1}, {-1, 1},
-            {-1, 0}, {-1, -1}, {0, -1}, {1, -1}
-    };
 
-    private CompoundButton.OnCheckedChangeListener inverseListener = (buttonView, isChecked) -> saveSettings();
-    private CompoundButton.OnCheckedChangeListener filterListener = (buttonView, isChecked) -> saveSettings();
-
+    // Listeners
+    private final CompoundButton.OnCheckedChangeListener inverseListener = (buttonView, isChecked) -> saveSettings();
+    private final CompoundButton.OnCheckedChangeListener filterListener = (buttonView, isChecked) -> saveSettings();
+    //endregion
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -529,100 +539,6 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         image.close();
     };
 
-    private void processImage(Image image) throws IOException {
-        frameCount++;
-        long currentTime = System.currentTimeMillis();
-        if (currentTime - lastFpsUpdateTime >= 1000) {
-            currentFps = frameCount * 1000f / (currentTime - lastFpsUpdateTime);
-            frameCount = 0;
-            lastFpsUpdateTime = currentTime;
-            runOnUiThread(() -> overlayView.setFps(currentFps));
-        }
-
-        Image.Plane yPlane = image.getPlanes()[0];
-        ByteBuffer yBuffer = yPlane.getBuffer();
-        int width = image.getWidth();
-        int height = image.getHeight();
-        int rowStride = yPlane.getRowStride();
-        int pixelStride = yPlane.getPixelStride();
-
-        byte[] yData = new byte[yBuffer.remaining()];
-        yBuffer.get(yData);
-        image.close();
-
-        overlayBitmap = createBinaryMask(yData, width, height, rowStride, pixelStride);
-        if (filterCheckbox.isChecked()) {
-            //overlayBitmap = removeSmallIslands(overlayBitmap);
-            overlayBitmap = removeIslands3x3(overlayBitmap);
-        }
-
-        boolean inv = inverseCheckbox.isChecked();
-        boolean[][] black = new boolean[height][width];
-        for (int y = 0; y < height; y++) {
-            for (int x = 0; x < width; x++) {
-                if (inv) {
-                    black[y][x] = !ContourExtractor.isBlack(overlayBitmap.getPixel(x, y));
-                }else{
-                    black[y][x] = ContourExtractor.isBlack(overlayBitmap.getPixel(x, y));
-                }
-            }
-        }
-
-        List<List<Point>> contours = ContourExtractor.extractContours(black);
-
-
-        int[] center = findLargestDarkSpotCenter(black);
-        double ang = 0;
-        int viewCenterX, viewCenterY;
-        int cX, cY;
-
-        if (center[0]!=-1 && center[1]!=-1) {
-            cX = height - center[1];
-            cY = center[0];
-            viewCenterX = (int) (cX * scale1);
-            viewCenterY = (int) (cY * scale2);
-            ang = PID(cX * 2.0 / height - 1.0, kp, kd);
-            if (ang>0) turnRight = true; else turnRight = false;
-        }else{
-            cY = 0;
-            cX = 0;
-            viewCenterY = 0;
-            viewCenterX = 0;
-            if (turnRight) ang =  Math.PI/2;
-                      else ang = -Math.PI/2;
-        }
-
-        if (isConnected && isSTART) {
-            if (ang > 0) {
-                sendMotorSpeed('B', (byte) (int) (speed * Math.cos(2 * ang)));
-                sendMotorSpeed('C', (byte) speed);
-            } else {
-                sendMotorSpeed('B', (byte) speed);
-                sendMotorSpeed('C', (byte) (int) (speed * Math.cos(2 * ang)));
-            }
-        } else if (isConnected && !isSTART) {
-            if (isFirst) {
-                sendMotorStop('B');
-                sendMotorStop('C');
-                isFirst = false;
-            }
-        }
-
-        double finalAng = ang;
-        runOnUiThread(() -> {
-            overlayView.setCenter(viewCenterX, viewCenterY);
-            overlayView.setCenterRaw(cX * 176 / 144, cY * 144 / 176);
-            overlayView.setOverlayBitmap(overlayBitmap);
-            overlayView.setContours(contours, overlayBitmap.getWidth(), overlayBitmap.getHeight());
-            overlayView.invalidate();
-            DecimalFormat df = new DecimalFormat("#.##");
-            logOutput.setText(" e=" + df.format(cX * 2.0 / height - 1.0) + "\n" +
-                    "Ang=" + df.format(finalAng) + " Ang_=" + df.format(finalAng * 180 / Math.PI) + "\n" +
-                    "Speed = " + (int) (speed * Math.cos(2 * finalAng))+"\n"+
-                    "Count ="+ contours.size()
-            );
-        });
-    }
 
     private Bitmap createBinaryMask(byte[] yData, int width, int height, int rowStride, int pixelStride) {
         int[] pixels = new int[width * height];
@@ -1278,4 +1194,109 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
     @Override public void onSurfaceTextureSizeChanged(@NonNull SurfaceTexture surface, int width, int height) {}
     @Override public boolean onSurfaceTextureDestroyed(@NonNull SurfaceTexture surface) { return false; }
     @Override public void onSurfaceTextureUpdated(@NonNull SurfaceTexture surface) {}
+
+
+
+
+
+    // ---------------------------------------------------------------------------
+    // ------------------------------   MAIN LOOP   ------------------------------
+    // ---------------------------------------------------------------------------
+    private void processImage(Image image) throws IOException {
+        frameCount++;
+        long currentTime = System.currentTimeMillis();
+        if (currentTime - lastFpsUpdateTime >= 1000) {
+            currentFps = frameCount * 1000f / (currentTime - lastFpsUpdateTime);
+            frameCount = 0;
+            lastFpsUpdateTime = currentTime;
+            runOnUiThread(() -> overlayView.setFps(currentFps));
+        }
+
+        Image.Plane yPlane = image.getPlanes()[0];
+        ByteBuffer yBuffer = yPlane.getBuffer();
+        int width = image.getWidth();
+        int height = image.getHeight();
+        int rowStride = yPlane.getRowStride();
+        int pixelStride = yPlane.getPixelStride();
+
+        byte[] yData = new byte[yBuffer.remaining()];
+        yBuffer.get(yData);
+        image.close();
+
+        overlayBitmap = createBinaryMask(yData, width, height, rowStride, pixelStride);
+        if (filterCheckbox.isChecked()) {
+            //overlayBitmap = removeSmallIslands(overlayBitmap);
+            overlayBitmap = removeIslands3x3(overlayBitmap);
+        }
+
+        boolean inv = inverseCheckbox.isChecked();
+        boolean[][] black = new boolean[height][width];
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                if (inv) {
+                    black[y][x] = !ContourExtractor.isBlack(overlayBitmap.getPixel(x, y));
+                }else{
+                    black[y][x] = ContourExtractor.isBlack(overlayBitmap.getPixel(x, y));
+                }
+            }
+        }
+
+        List<List<Point>> contours = ContourExtractor.extractContours(black);
+        List<List<Point>> contours4 = ContourExtractor.findConvexQuadrilaterals(contours, 10);
+
+        int[] center = findLargestDarkSpotCenter(black);
+        double ang = 0;
+        int viewCenterX, viewCenterY;
+        int cX, cY;
+
+        if (center[0]!=-1 && center[1]!=-1) {
+            cX = height - center[1];
+            cY = center[0];
+            viewCenterX = (int) (cX * scale1);
+            viewCenterY = (int) (cY * scale2);
+            ang = PID(cX * 2.0 / height - 1.0, kp, kd);
+            if (ang>0) turnRight = true; else turnRight = false;
+        }else{
+            cY = 0;
+            cX = 0;
+            viewCenterY = 0;
+            viewCenterX = 0;
+            if (turnRight) ang =  Math.PI/2;
+            else ang = -Math.PI/2;
+        }
+
+        if (isConnected && isSTART) {
+            if (ang > 0) {
+                sendMotorSpeed('B', (byte) (int) (speed * Math.cos(2 * ang)));
+                sendMotorSpeed('C', (byte) speed);
+            } else {
+                sendMotorSpeed('B', (byte) speed);
+                sendMotorSpeed('C', (byte) (int) (speed * Math.cos(2 * ang)));
+            }
+        } else if (isConnected && !isSTART) {
+            if (isFirst) {
+                sendMotorStop('B');
+                sendMotorStop('C');
+                isFirst = false;
+            }
+        }
+
+        double finalAng = ang;
+        runOnUiThread(() -> {
+            overlayView.setCenter(viewCenterX, viewCenterY);
+            overlayView.setCenterRaw(cX * 176 / 144, cY * 144 / 176);
+            overlayView.setOverlayBitmap(overlayBitmap);
+            overlayView.setContours(contours, overlayBitmap.getWidth(), overlayBitmap.getHeight());
+            overlayView.setContours4(contours4);
+            overlayView.invalidate();
+            DecimalFormat df = new DecimalFormat("#.##");
+            logOutput.setText(" e=" + df.format(cX * 2.0 / height - 1.0) + "\n" +
+                    "Ang=" + df.format(finalAng) + " Ang_=" + df.format(finalAng * 180 / Math.PI) + "\n" +
+                    "Speed = " + (int) (speed * Math.cos(2 * finalAng))+"\n"+
+                    "Count ="+ contours.size()
+            );
+        });
+    }
+
+
 }
