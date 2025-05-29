@@ -236,9 +236,10 @@ public class ContourExtractor {
             }
 
             // Проверяем, что это четырёхугольник (замкнутый, 5 точек)
-            if (simplified.size() == 5) {
+            if (simplified.size() >= 5 && simplified.size() <= 7) {
                 // Проверяем выпуклость
-                if (isConvex(simplified)) {
+                if (isConvex(simplified))
+                {
                     quads.add(simplified);
                 }
             }

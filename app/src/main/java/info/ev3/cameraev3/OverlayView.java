@@ -28,12 +28,13 @@ public class OverlayView extends View {
     private Paint bitmapPaint;
     private float fps = 0;
     private Paint fpsPaint;
-
     private List<List<Point>> contours = new ArrayList<>();
     private List<List<Point>> contours4 = new ArrayList<>();
     private int bitmapWidth, bitmapHeight;
     private Paint contourPaint;
     private Paint contourPaint4;
+    private Paint whiteLinePaint;
+    private List<WhiteStripe> whiteStripes = new ArrayList<>();
 
     public OverlayView(Context context, AttributeSet attrs) {
         super(context, attrs);
@@ -67,7 +68,7 @@ public class OverlayView extends View {
 
         // Paint для контуров
         contourPaint = new Paint();
-        contourPaint.setColor(0xFF00FF00); // Зеленый цвет
+        contourPaint.setColor(0xFFFFFF00); //  Желтый цвет
         contourPaint.setStyle(Paint.Style.STROKE);
         contourPaint.setStrokeWidth(3);
         contourPaint.setAntiAlias(true);
@@ -78,6 +79,17 @@ public class OverlayView extends View {
         contourPaint4.setStyle(Paint.Style.STROKE);
         contourPaint4.setStrokeWidth(10);
         contourPaint4.setAntiAlias(true);
+
+        // Paint для белых сегментов
+        whiteLinePaint = new Paint();
+        whiteLinePaint.setColor(0xFF00AA00); // Зеленый цвет
+        whiteLinePaint.setStrokeWidth(10);
+        whiteLinePaint.setAntiAlias(true);
+    }
+
+    public void setWhiteStripes(List<WhiteStripe> stripes) {
+        this.whiteStripes = stripes;
+        invalidate();
     }
 
     public void setContours(List<List<Point>> contours, int bitmapWidth, int bitmapHeight) {
@@ -209,6 +221,20 @@ public class OverlayView extends View {
                     path.lineTo(x, y);
                 }
                 canvas.drawPath(path, contourPaint4);
+            }
+        }
+
+        // Draw white stripes
+        if (whiteStripes != null) {
+
+            float scaleX = getWidth() / (float) bitmapHeight;
+            float scaleY = getHeight() / (float) bitmapWidth;
+
+            for (WhiteStripe ws : whiteStripes) {
+                float x1 = (bitmapHeight - ws.yStart) * scaleX;
+                float x2 = (bitmapHeight - ws.yEnd) * scaleX;
+                float y = ws.columnX * scaleY;
+                canvas.drawLine(x1, y, x2, y, whiteLinePaint);
             }
         }
 

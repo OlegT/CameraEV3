@@ -70,6 +70,9 @@ import java.util.Queue;
 import java.util.Set;
 import java.util.UUID;
 
+//import org.tensorflow.lite.Interpreter;
+
+
 
 public class MainActivity extends AppCompatActivity implements TextureView.SurfaceTextureListener {
 
@@ -167,6 +170,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
     private final CompoundButton.OnCheckedChangeListener inverseListener = (buttonView, isChecked) -> saveSettings();
     private final CompoundButton.OnCheckedChangeListener filterListener = (buttonView, isChecked) -> saveSettings();
     //endregion
+    private List<int[]> whiteLines = new ArrayList<>();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -1191,6 +1195,122 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         return res;
     }
 
+    private List<WhiteStripe> findMaxWhiteStripesInColumns(boolean[][] black, int nColumns, int columnStep) {
+        List<WhiteStripe> stripes = new ArrayList<>();
+        int height = black.length;
+        int width = black[0].length;
+        int x = width - columnStep/2;
+        for (int col = 0; col < nColumns; col++) {
+            x-= columnStep;
+            if (x < 0) break; // чтобы не выйти за границу
+
+            int maxLen = 0;
+            int maxStart = -1, maxEnd = -1;
+            int curStart = -1, curLen = 0;
+            for (int y = 0; y < height; y++) {
+                if (!black[y][x]) { // белый пиксель
+                    if (curStart == -1) curStart = y;
+                    curLen++;
+                } else {
+                    if (curLen > maxLen) {
+                        maxLen = curLen;
+                        maxStart = curStart;
+                        maxEnd = y - 1;
+                    }
+                    curStart = -1;
+                    curLen = 0;
+                }
+            }
+            // Если закончился на белом
+            if (curLen > maxLen) {
+                maxLen = curLen;
+                maxStart = curStart;
+                maxEnd = height - 1;
+            }
+            if (maxLen > 0 && maxStart > 0 && maxEnd < height - 1) {
+                stripes.add(new WhiteStripe(x, maxStart, maxEnd));
+            }
+        }
+        return stripes;
+    }
+
+
+    public static List<Point> findProjectedPoints(List<Point> points) {
+        if (points.isEmpty()) {
+            return new ArrayList<>();
+        }
+        if (points.size() == 1) {
+            Point p = points.get(0);
+            return Arrays.asList(new Point(p), new Point(p));
+        }
+
+        // Вычисление средних значений координат
+        double sumX = 0, sumY = 0;
+        for (Point p : points) {
+            sumX += p.x;
+            sumY += p.y;
+        }
+        double meanX = sumX / points.size();
+        double meanY = sumY / points.size();
+
+        // Вычисление элементов ковариационной матрицы
+        double cov_xx = 0, cov_xy = 0, cov_yy = 0;
+        for (Point p : points) {
+            double dx = p.x - meanX;
+            double dy = p.y - meanY;
+            cov_xx += dx * dx;
+            cov_xy += dx * dy;
+            cov_yy += dy * dy;
+        }
+
+        // Вычисление собственных значений
+        double trace = cov_xx + cov_yy;
+        double det = cov_xx * cov_yy - cov_xy * cov_xy;
+        double discriminant = Math.max(0, trace * trace - 4 * det);
+        double lambda2 = (trace - Math.sqrt(discriminant)) / 2;
+
+        // Вычисление нормали (a, b) к прямой
+        double a = cov_xy;
+        double b = lambda2 - cov_xx;
+        double norm = Math.sqrt(a * a + b * b);
+
+        // Обработка вырожденного случая (коллинеарные точки)
+        if (norm < 1e-10) {
+            if (cov_xx <= cov_yy) {
+                a = 1;
+                b = 0;
+            } else {
+                a = 0;
+                b = 1;
+            }
+            norm = 1;
+        }
+        a /= norm;
+        b /= norm;
+
+        // Коэффициент c уравнения прямой
+        double c = -(a * meanX + b * meanY);
+
+        // Проекция первой точки
+        Point first = points.get(0);
+        double dFirst = a * first.x + b * first.y + c;
+        Point projFirst = new Point(
+                (int) Math.round(first.x - a * dFirst),
+                (int) Math.round(first.y - b * dFirst)
+        );
+
+        // Проекция последней точки
+        Point last = points.get(points.size() - 1);
+        double dLast = a * last.x + b * last.y + c;
+        Point projLast = new Point(
+                (int) Math.round(last.x - a * dLast),
+                (int) Math.round(last.y - b * dLast)
+        );
+
+        return Arrays.asList(projFirst, projLast);
+    }
+
+
     @Override public void onSurfaceTextureSizeChanged(@NonNull SurfaceTexture surface, int width, int height) {}
     @Override public boolean onSurfaceTextureDestroyed(@NonNull SurfaceTexture surface) { return false; }
     @Override public void onSurfaceTextureUpdated(@NonNull SurfaceTexture surface) {}
@@ -1241,8 +1361,32 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
             }
         }
 
+
         List<List<Point>> contours = ContourExtractor.extractContours(black);
-        List<List<Point>> contours4 = ContourExtractor.findConvexQuadrilaterals(contours, 10);
+        List<List<Point>> contours4 = new ArrayList<>();
+        //contours4 = ContourExtractor.findConvexQuadrilaterals(contours, 4);
+
+
+        int nColumns = 50; // сколько колонок
+        int columnStep = 3; // шаг между колонками (пикселей)
+        List<WhiteStripe> whiteStripes = findMaxWhiteStripesInColumns(black, nColumns, columnStep);
+
+        // Right
+        List<Point> points= new ArrayList<>();
+        for (WhiteStripe stripe : whiteStripes) {
+            points.add(new Point(stripe.columnX, stripe.yStart));
+        }
+        List<Point> pLineR = findProjectedPoints(points);
+        // Left
+        points.clear();
+        for (WhiteStripe stripe : whiteStripes) {
+            points.add(new Point(stripe.columnX, stripe.yEnd));
+        }
+        List<Point> pLineL = findProjectedPoints(points);
+        if (!pLineR.isEmpty() && !pLineL.isEmpty()) {
+            contours4.add(new ArrayList<>(Arrays.asList(pLineR.get(0), pLineR.get(1), pLineL.get(1), pLineL.get(0), pLineR.get(0))));
+        }
+
 
         int[] center = findLargestDarkSpotCenter(black);
         double ang = 0;
@@ -1288,6 +1432,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
             overlayView.setOverlayBitmap(overlayBitmap);
             overlayView.setContours(contours, overlayBitmap.getWidth(), overlayBitmap.getHeight());
             overlayView.setContours4(contours4);
+            //overlayView.setWhiteStripes(whiteStripes);
             overlayView.invalidate();
             DecimalFormat df = new DecimalFormat("#.##");
             logOutput.setText(" e=" + df.format(cX * 2.0 / height - 1.0) + "\n" +
