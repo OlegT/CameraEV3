@@ -60,6 +60,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.text.DecimalFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -1090,6 +1091,118 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         byteArrayOutputStream.writeTo(outputStream);
     }
 
+    public float readUltrasonicSensor() throws IOException {
+        // Шаг 1: Сформировать команду в ByteArrayOutputStream
+        ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
+
+        // Номер сообщения (например, 42 — можете делать счетчик)
+        int messageCounter = 1;
+        writeUShort(byteArrayOutputStream, messageCounter);
+
+        // Тип команды: прямая команда, требуется ответ
+        writeUByte(byteArrayOutputStream, 0x00);
+
+        // Резервируем 4 байта для одной глобальной переменной (float)
+        writeVariablesAllocation(byteArrayOutputStream, 4, 0);
+
+        // Команда: opInput_Device (0x99), подкоманда READY_SI (0x1D)
+        //writeCommand(byteArrayOutputStream, 0x99/*opInput_Device*/, 0x1D/*READY_SI*/);
+        writeCommand(byteArrayOutputStream, 0x99);
+        writeUByte(byteArrayOutputStream, 0x1D);
+
+        // Модуль (0)
+        writeParameterAsSmallByte(byteArrayOutputStream, 0);
+
+        // Порт 1 (0)
+        writeParameterAsSmallByte(byteArrayOutputStream, 0);
+
+        // Тип устройства: 0 (не менять)
+        writeParameterAsSmallByte(byteArrayOutputStream, 0);
+
+        // Режим: 0 — сантиметры (для ультразвукового датчика)
+        writeParameterAsSmallByte(byteArrayOutputStream, 0);
+
+        // Количество переменных: 1
+        writeParameterAsSmallByte(byteArrayOutputStream, 1);
+
+        // Глобальный индекс переменной: 0
+        //writeGlobalIndex(byteArrayOutputStream, 0);
+        writeUByte(byteArrayOutputStream, 0x60); // 0x60 | 0 == 0x60
+
+
+        // Шаг 2: Отправить команду (размер + сообщение)
+        OutputStream outputStream = this.outputStream; // ваш поток
+        writeUShort(outputStream, byteArrayOutputStream.size());
+        byteArrayOutputStream.writeTo(outputStream);
+
+        // Шаг 3: Прочитать ответ
+        InputStream inputStream = this.inputStream; // ваш поток
+        int replySize = readUShort(inputStream);
+        byte[] reply = new byte[replySize];
+        int offset = 0;
+        while (offset < replySize) {
+            int read = inputStream.read(reply, offset, replySize - offset);
+            if (read == -1) throw new IOException("Disconnected");
+            offset += read;
+        }
+
+        // Шаг 4: Разобрать ответ
+        if (reply[2] != 2) return reply[2];
+        ByteBuffer buf = ByteBuffer.wrap(reply);
+        buf.order(ByteOrder.LITTLE_ENDIAN);
+        // Первые 3 байта: номер, тип, ...
+        // 4-й байт: offset 3 — float
+        return buf.getFloat(3);
+    }
+
+    private int readMotorEncoder(char port) throws IOException {
+        ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
+
+        // Заголовок сообщения
+        int messageCounter = 1;
+        writeUShort(byteArrayOutputStream, messageCounter);
+        writeUByte(byteArrayOutputStream, 0x00); // Тип команды: прямая команда, требуется ответ
+
+        // Резервируем 4 байта под результат (Data32)
+        writeVariablesAllocation(byteArrayOutputStream, 4, 0);
+
+        // Команда opOutput_Get_Count (0xB3)
+        writeCommand(byteArrayOutputStream, 0xB3);
+
+        // Параметры:
+        writeParameterAsSmallByte(byteArrayOutputStream, 0); // Layer (0)
+        writeParameterAsSmallByte(byteArrayOutputStream, getPortByte(port)); // Порт (битовая маска)
+
+        // Указатель на переменную для результата (глобальный индекс 0)
+        writeUByte(byteArrayOutputStream, 0x60); // Формат: 0x60 | global_index
+
+        // Отправляем команду
+        writeUShort(outputStream, byteArrayOutputStream.size());
+        byteArrayOutputStream.writeTo(outputStream);
+
+        // Читаем ответ
+        int replySize = readUShort(inputStream);
+        byte[] reply = new byte[replySize];
+        int offset = 0;
+        while (offset < replySize) {
+            int read = inputStream.read(reply, offset, replySize - offset);
+            if (read == -1) throw new IOException("Disconnected");
+            offset += read;
+        }
+
+        // Разбираем ответ:
+        // [0-1] - размер сообщения (игнорируем)
+        // [2]   - тип ответа (0x02 = успех)
+        // [3-6] - значение энкодера (Data32, little-endian)
+        if (reply[2] != 0x02) {
+            return reply[2];
+        }
+
+        return ByteBuffer.wrap(reply, 3, 4)
+                .order(ByteOrder.LITTLE_ENDIAN)
+                .getInt();
+    }
+
     private byte getPortByte(char port) {
         switch (port) {
             case 'A': return 0x01;
@@ -1133,6 +1246,18 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
             throw new IllegalArgumentException("Value must be in range " + Byte.MIN_VALUE + " to " + Byte.MAX_VALUE + ".");
         writeUByte(_stream, 0x81);
         writeByte(_stream, (byte)value);
+    }
+
+    //Читает unsigned byte.
+    private int readUByte(InputStream _stream) throws IOException {
+        byte bytes[] = new byte[1];
+        _stream.read(bytes);
+        return bytes[0] < 0 ? (int)bytes[0] + 256 : (int)bytes[0];
+    }
+
+    //Читает unsigned short.
+    private int readUShort(InputStream _stream) throws IOException {
+        return readUByte(_stream) | (readUByte(_stream) << 8);
     }
 
     private void saveSettings() {
@@ -1323,6 +1448,8 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
     // ------------------------------   MAIN LOOP   ------------------------------
     // ---------------------------------------------------------------------------
     private void processImage(Image image) throws IOException {
+        float dist = -1;
+        float encB = -1;
         frameCount++;
         long currentTime = System.currentTimeMillis();
         if (currentTime - lastFpsUpdateTime >= 1000) {
@@ -1417,15 +1544,23 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                 sendMotorSpeed('B', (byte) speed);
                 sendMotorSpeed('C', (byte) (int) (speed * Math.cos(2 * ang)));
             }
+            dist = readUltrasonicSensor();
+            encB = readMotorEncoder('B');
         } else if (isConnected && !isSTART) {
+            encB = readMotorEncoder('B');
             if (isFirst) {
                 sendMotorStop('B');
                 sendMotorStop('C');
                 isFirst = false;
             }
+            dist = readUltrasonicSensor();
+        } else {
+            encB = -1;
         }
 
         double finalAng = ang;
+        float finalDist = dist;
+        float finalEncB = encB;
         runOnUiThread(() -> {
             overlayView.setCenter(viewCenterX, viewCenterY);
             overlayView.setCenterRaw(cX * 176 / 144, cY * 144 / 176);
@@ -1438,7 +1573,8 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
             logOutput.setText(" e=" + df.format(cX * 2.0 / height - 1.0) + "\n" +
                     "Ang=" + df.format(finalAng) + " Ang_=" + df.format(finalAng * 180 / Math.PI) + "\n" +
                     "Speed = " + (int) (speed * Math.cos(2 * finalAng))+"\n"+
-                    "Count ="+ contours.size()
+                    "Dist = " + df.format(finalDist) + "\n"+
+                    "Encoder = " + finalEncB
             );
         });
     }
