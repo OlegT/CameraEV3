@@ -34,6 +34,7 @@ public class OverlayView extends View {
     private Paint contourPaint;
     private Paint contourPaint4;
     private Paint whiteLinePaint;
+    private Paint fillPaint;
     private List<WhiteStripe> whiteStripes = new ArrayList<>();
 
     public OverlayView(Context context, AttributeSet attrs) {
@@ -79,6 +80,12 @@ public class OverlayView extends View {
         contourPaint4.setStyle(Paint.Style.STROKE);
         contourPaint4.setStrokeWidth(10);
         contourPaint4.setAntiAlias(true);
+
+        // Paint для заливки четырехугольников
+        fillPaint = new Paint();
+        fillPaint.setColor(0x80651FFF); // Полупрозрачный фиолетовый (0x40 = 25% прозрачность)
+        fillPaint.setStyle(Paint.Style.FILL);
+        fillPaint.setAntiAlias(true);
 
         // Paint для белых сегментов
         whiteLinePaint = new Paint();
@@ -220,6 +227,8 @@ public class OverlayView extends View {
 
                     path.lineTo(x, y);
                 }
+                path.close();
+                canvas.drawPath(path, fillPaint);
                 canvas.drawPath(path, contourPaint4);
             }
         }
