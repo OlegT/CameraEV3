@@ -70,6 +70,10 @@ import java.util.Locale;
 import java.util.Queue;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
 
 //import org.tensorflow.lite.Interpreter;
 
@@ -171,7 +175,17 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
     private final CompoundButton.OnCheckedChangeListener inverseListener = (buttonView, isChecked) -> saveSettings();
     private final CompoundButton.OnCheckedChangeListener filterListener = (buttonView, isChecked) -> saveSettings();
     //endregion
+
+    // Очередь команд для Bluetooth
+    private final LinkedBlockingQueue<Runnable> commandQueue = new LinkedBlockingQueue<>(1);
+    private ExecutorService bluetoothExecutor;
+
+
     private List<int[]> whiteLines = new ArrayList<>();
+
+    private volatile float lastDistance = -1;
+    private volatile int lastEncoderB = -1;
+    private volatile int lastEncoderC = -1;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -389,6 +403,9 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                 }
             }
         });
+
+        // Инициализация Bluetooth исполнителя
+        bluetoothExecutor = Executors.newSingleThreadExecutor();
 
         updateZoomControl();
     }
@@ -889,6 +906,10 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         if (backgroundThread != null) {
             backgroundThread.quitSafely();
         }
+        if (bluetoothExecutor != null) {
+            bluetoothExecutor.shutdownNow();
+        }
+        commandQueue.clear();
     }
 
     @Override
@@ -1056,6 +1077,33 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         }
     }
 
+    // Асинхронное выполнение команд
+    private void executeCommand(Runnable command) {
+        if (!isConnected || bluetoothExecutor.isShutdown()) return;
+
+        // Очищаем очередь от предыдущих команд
+        commandQueue.clear();
+
+        try {
+            // Пытаемся добавить новую команду (с таймаутом)
+            if (commandQueue.offer(command, 50, TimeUnit.MILLISECONDS)) {
+                bluetoothExecutor.execute(() -> {
+                    try {
+                        Runnable task = commandQueue.poll();
+                        if (task != null) {
+                            task.run();
+                        }
+                    } catch (Exception e) {
+                        Log.e(TAG, "Command execution error", e);
+                        runOnUiThread(this::disconnect);
+                    }
+                });
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
     private void sendMotorSpeed(char port, byte speed) throws IOException {
         ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
         writeUShort(byteArrayOutputStream, 2);
@@ -1091,7 +1139,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         byteArrayOutputStream.writeTo(outputStream);
     }
 
-    public float readUltrasonicSensor() throws IOException {
+    public float readUltrasonicSensor(byte port) throws IOException {
         // Шаг 1: Сформировать команду в ByteArrayOutputStream
         ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
 
@@ -1114,7 +1162,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         writeParameterAsSmallByte(byteArrayOutputStream, 0);
 
         // Порт 1 (0)
-        writeParameterAsSmallByte(byteArrayOutputStream, 0);
+        writeParameterAsSmallByte(byteArrayOutputStream, port);
 
         // Тип устройства: 0 (не менять)
         writeParameterAsSmallByte(byteArrayOutputStream, 0);
@@ -1171,7 +1219,15 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
 
         // Параметры:
         writeParameterAsSmallByte(byteArrayOutputStream, 0); // Layer (0)
-        writeParameterAsSmallByte(byteArrayOutputStream, getPortByte(port)); // Порт (битовая маска)
+
+        byte portNum = 0;
+        switch (port) {
+            case 'A': portNum = 0; break;
+            case 'B': portNum = 1; break;
+            case 'C': portNum = 2; break;
+            case 'D': portNum = 3; break;
+        }
+        writeParameterAsSmallByte(byteArrayOutputStream, portNum);//getPortByte(port)); // Порт (битовая маска)
 
         // Указатель на переменную для результата (глобальный индекс 0)
         writeUByte(byteArrayOutputStream, 0x60); // Формат: 0x60 | global_index
@@ -1210,6 +1266,32 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
             case 'C': return 0x04;
             case 'D': return 0x08;
             default:  return 0x00;
+        }
+    }
+
+    private void sendMotorSpeedSync(char port, byte speed) {
+        try {
+            sendMotorSpeed(port, speed);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private void sendMotorStopSync(char port) {
+        try {
+            sendMotorStop(port);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private void readSensorsSync() {
+        try {
+            lastDistance = readUltrasonicSensor((byte) 0);
+            lastEncoderB = readMotorEncoder('B');
+            lastEncoderC = readMotorEncoder('C');
+        } catch (IOException e) {
+            throw new RuntimeException(e);
         }
     }
 
@@ -1448,8 +1530,6 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
     // ------------------------------   MAIN LOOP   ------------------------------
     // ---------------------------------------------------------------------------
     private void processImage(Image image) throws IOException {
-        float dist = -1;
-        float encB = -1;
         frameCount++;
         long currentTime = System.currentTimeMillis();
         if (currentTime - lastFpsUpdateTime >= 1000) {
@@ -1536,31 +1616,36 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
             else ang = -Math.PI/2;
         }
 
-        if (isConnected && isSTART) {
-            if (ang > 0) {
-                sendMotorSpeed('B', (byte) (int) (speed * Math.cos(2 * ang)));
-                sendMotorSpeed('C', (byte) speed);
-            } else {
-                sendMotorSpeed('B', (byte) speed);
-                sendMotorSpeed('C', (byte) (int) (speed * Math.cos(2 * ang)));
-            }
-            dist = readUltrasonicSensor();
-            encB = readMotorEncoder('B');
-        } else if (isConnected && !isSTART) {
-            encB = readMotorEncoder('B');
-            if (isFirst) {
-                sendMotorStop('B');
-                sendMotorStop('C');
-                isFirst = false;
-            }
-            dist = readUltrasonicSensor();
-        } else {
-            encB = -1;
+
+        if (isConnected) {
+            // Создаем группу команд для выполнения
+            double finalAng1 = ang;
+            Runnable commandGroup = () -> {
+                // 1. Выполняем команды для моторов
+                if (isSTART) {
+                    if (finalAng1 > 0) {
+                        sendMotorSpeedSync('B', (byte) (int) (speed * Math.cos(2 * finalAng1)));
+                        sendMotorSpeedSync('C', (byte) speed);
+                    } else {
+                        sendMotorSpeedSync('B', (byte) speed);
+                        sendMotorSpeedSync('C', (byte) (int) (speed * Math.cos(2 * finalAng1)));
+                    }
+                } else if (isFirst) {
+                    sendMotorStopSync('B');
+                    sendMotorStopSync('C');
+                    isFirst = false;
+                }
+
+                // 2. Читаем данные сенсоров
+                readSensorsSync();
+            };
+
+            // Отправляем группу команд на выполнение
+            executeCommand(commandGroup);
         }
 
+
         double finalAng = ang;
-        float finalDist = dist;
-        float finalEncB = encB;
         runOnUiThread(() -> {
             overlayView.setCenter(viewCenterX, viewCenterY);
             overlayView.setCenterRaw(cX * 176 / 144, cY * 144 / 176);
@@ -1570,11 +1655,12 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
             //overlayView.setWhiteStripes(whiteStripes);
             overlayView.invalidate();
             DecimalFormat df = new DecimalFormat("#.##");
-            logOutput.setText(" e=" + df.format(cX * 2.0 / height - 1.0) + "\n" +
+            logOutput.setText(" e=" + df.format(cX * 2.0 / height - 1.0) +
                     "Ang=" + df.format(finalAng) + " Ang_=" + df.format(finalAng * 180 / Math.PI) + "\n" +
                     "Speed = " + (int) (speed * Math.cos(2 * finalAng))+"\n"+
-                    "Dist = " + df.format(finalDist) + "\n"+
-                    "Encoder = " + finalEncB
+                    "Dist = " + df.format(lastDistance) + "\n"+
+                    "Encoder B = " + lastEncoderB + "\n"+
+                    "Encoder C = " + lastEncoderC
             );
         });
     }
