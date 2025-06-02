@@ -154,6 +154,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
     private boolean isConnected = false;
     private boolean isSTART = false;
     private boolean isFirst = true;
+    private boolean isFirstRead = true;
 
     // FPS
     private long lastFpsUpdateTime = 0;
@@ -184,6 +185,8 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
     private List<int[]> whiteLines = new ArrayList<>();
 
     private volatile float lastDistance = -1;
+    private volatile int lastEncoderA = -1;
+    private volatile int lastEncoderA0 = -1;
     private volatile int lastEncoderB = -1;
     private volatile int lastEncoderC = -1;
 
@@ -1080,12 +1083,9 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
     // Асинхронное выполнение команд
     private void executeCommand(Runnable command) {
         if (!isConnected || bluetoothExecutor.isShutdown()) return;
-
-        // Очищаем очередь от предыдущих команд
         commandQueue.clear();
 
         try {
-            // Пытаемся добавить новую команду (с таймаутом)
             if (commandQueue.offer(command, 50, TimeUnit.MILLISECONDS)) {
                 bluetoothExecutor.execute(() -> {
                     try {
@@ -1140,51 +1140,25 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
     }
 
     public float readUltrasonicSensor(byte port) throws IOException {
-        // Шаг 1: Сформировать команду в ByteArrayOutputStream
         ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
-
-        // Номер сообщения (например, 42 — можете делать счетчик)
         int messageCounter = 1;
         writeUShort(byteArrayOutputStream, messageCounter);
-
-        // Тип команды: прямая команда, требуется ответ
         writeUByte(byteArrayOutputStream, 0x00);
-
-        // Резервируем 4 байта для одной глобальной переменной (float)
         writeVariablesAllocation(byteArrayOutputStream, 4, 0);
-
-        // Команда: opInput_Device (0x99), подкоманда READY_SI (0x1D)
-        //writeCommand(byteArrayOutputStream, 0x99/*opInput_Device*/, 0x1D/*READY_SI*/);
         writeCommand(byteArrayOutputStream, 0x99);
         writeUByte(byteArrayOutputStream, 0x1D);
-
-        // Модуль (0)
         writeParameterAsSmallByte(byteArrayOutputStream, 0);
-
-        // Порт 1 (0)
         writeParameterAsSmallByte(byteArrayOutputStream, port);
-
-        // Тип устройства: 0 (не менять)
         writeParameterAsSmallByte(byteArrayOutputStream, 0);
-
-        // Режим: 0 — сантиметры (для ультразвукового датчика)
         writeParameterAsSmallByte(byteArrayOutputStream, 0);
-
-        // Количество переменных: 1
         writeParameterAsSmallByte(byteArrayOutputStream, 1);
-
-        // Глобальный индекс переменной: 0
-        //writeGlobalIndex(byteArrayOutputStream, 0);
         writeUByte(byteArrayOutputStream, 0x60); // 0x60 | 0 == 0x60
 
-
-        // Шаг 2: Отправить команду (размер + сообщение)
-        OutputStream outputStream = this.outputStream; // ваш поток
+        OutputStream outputStream = this.outputStream;
         writeUShort(outputStream, byteArrayOutputStream.size());
         byteArrayOutputStream.writeTo(outputStream);
 
-        // Шаг 3: Прочитать ответ
-        InputStream inputStream = this.inputStream; // ваш поток
+        InputStream inputStream = this.inputStream;
         int replySize = readUShort(inputStream);
         byte[] reply = new byte[replySize];
         int offset = 0;
@@ -1194,30 +1168,19 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
             offset += read;
         }
 
-        // Шаг 4: Разобрать ответ
         if (reply[2] != 2) return reply[2];
         ByteBuffer buf = ByteBuffer.wrap(reply);
         buf.order(ByteOrder.LITTLE_ENDIAN);
-        // Первые 3 байта: номер, тип, ...
-        // 4-й байт: offset 3 — float
         return buf.getFloat(3);
     }
 
     private int readMotorEncoder(char port) throws IOException {
         ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
-
-        // Заголовок сообщения
         int messageCounter = 1;
         writeUShort(byteArrayOutputStream, messageCounter);
-        writeUByte(byteArrayOutputStream, 0x00); // Тип команды: прямая команда, требуется ответ
-
-        // Резервируем 4 байта под результат (Data32)
+        writeUByte(byteArrayOutputStream, 0x00);
         writeVariablesAllocation(byteArrayOutputStream, 4, 0);
-
-        // Команда opOutput_Get_Count (0xB3)
         writeCommand(byteArrayOutputStream, 0xB3);
-
-        // Параметры:
         writeParameterAsSmallByte(byteArrayOutputStream, 0); // Layer (0)
 
         byte portNum = 0;
@@ -1227,16 +1190,11 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
             case 'C': portNum = 2; break;
             case 'D': portNum = 3; break;
         }
-        writeParameterAsSmallByte(byteArrayOutputStream, portNum);//getPortByte(port)); // Порт (битовая маска)
-
-        // Указатель на переменную для результата (глобальный индекс 0)
-        writeUByte(byteArrayOutputStream, 0x60); // Формат: 0x60 | global_index
-
-        // Отправляем команду
+        writeParameterAsSmallByte(byteArrayOutputStream, portNum); // Порт (битовая маска)
+        writeUByte(byteArrayOutputStream, 0x60);
         writeUShort(outputStream, byteArrayOutputStream.size());
         byteArrayOutputStream.writeTo(outputStream);
 
-        // Читаем ответ
         int replySize = readUShort(inputStream);
         byte[] reply = new byte[replySize];
         int offset = 0;
@@ -1246,10 +1204,6 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
             offset += read;
         }
 
-        // Разбираем ответ:
-        // [0-1] - размер сообщения (игнорируем)
-        // [2]   - тип ответа (0x02 = успех)
-        // [3-6] - значение энкодера (Data32, little-endian)
         if (reply[2] != 0x02) {
             return reply[2];
         }
@@ -1288,8 +1242,14 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
     private void readSensorsSync() {
         try {
             lastDistance = readUltrasonicSensor((byte) 0);
-            lastEncoderB = readMotorEncoder('B');
-            lastEncoderC = readMotorEncoder('C');
+            lastEncoderA = readMotorEncoder('A');
+            if (isFirstRead){
+                lastEncoderA0 = lastEncoderA;
+                isFirstRead = false;
+            }
+            lastEncoderA -= lastEncoderA0;
+            //lastEncoderB = readMotorEncoder('B');
+            //lastEncoderC = readMotorEncoder('C');
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
@@ -1616,13 +1576,25 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
             else ang = -Math.PI/2;
         }
 
+        int delta = 0;
 
         if (isConnected) {
-            // Создаем группу команд для выполнения
-            double finalAng1 = ang;
+            int finalAng1 = (int) ang;
+            delta = (finalAng1 - lastEncoderA)/5;
+            if (delta > 127) delta = 127;
+            else if (delta < -127) delta = -127;
+            final int delta1 = delta;
             Runnable commandGroup = () -> {
                 // 1. Выполняем команды для моторов
                 if (isSTART) {
+                    if (Math.abs(delta1)>1) {
+                        sendMotorSpeedSync('A', (byte) delta1);
+                    }
+                    else
+                    {
+                        sendMotorStopSync('A');
+                    }
+                    /*
                     if (finalAng1 > 0) {
                         sendMotorSpeedSync('B', (byte) (int) (speed * Math.cos(2 * finalAng1)));
                         sendMotorSpeedSync('C', (byte) speed);
@@ -1630,10 +1602,15 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                         sendMotorSpeedSync('B', (byte) speed);
                         sendMotorSpeedSync('C', (byte) (int) (speed * Math.cos(2 * finalAng1)));
                     }
+                     */
+                    sendMotorSpeedSync('B', (byte) speed);
+                    sendMotorSpeedSync('C', (byte) speed);
                 } else if (isFirst) {
                     sendMotorStopSync('B');
                     sendMotorStopSync('C');
+                    sendMotorStopSync('A');
                     isFirst = false;
+                    isFirstRead = true;
                 }
 
                 // 2. Читаем данные сенсоров
@@ -1646,6 +1623,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
 
 
         double finalAng = ang;
+        int finalDelta = delta;
         runOnUiThread(() -> {
             overlayView.setCenter(viewCenterX, viewCenterY);
             overlayView.setCenterRaw(cX * 176 / 144, cY * 144 / 176);
@@ -1659,8 +1637,8 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                     "Ang=" + df.format(finalAng) + " Ang_=" + df.format(finalAng * 180 / Math.PI) + "\n" +
                     "Speed = " + (int) (speed * Math.cos(2 * finalAng))+"\n"+
                     "Dist = " + df.format(lastDistance) + "\n"+
-                    "Encoder B = " + lastEncoderB + "\n"+
-                    "Encoder C = " + lastEncoderC
+                    "Encoder A = " + lastEncoderA+ "\n"+
+                    "Delta = " + finalDelta
             );
         });
     }

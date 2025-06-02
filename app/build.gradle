@@ -21,7 +21,7 @@ android {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
 
-            def appName = "CameraEV3"
+            def appName = "CamEV3"
             def versionNameValue = defaultConfig.versionName
             def versionCodeValue = defaultConfig.versionCode
             def buildTime = new Date().format("MMddHHmm")
