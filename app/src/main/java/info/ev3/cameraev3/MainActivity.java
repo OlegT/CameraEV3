@@ -1126,6 +1126,28 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         byteArrayOutputStream.writeTo(outputStream);
     }
 
+    private void sendMotorSpeedAngle(char port, byte power, int angle) throws IOException{
+        ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
+        writeUShort(byteArrayOutputStream, 3);
+        writeUByte(byteArrayOutputStream, 0x80);
+        writeVariablesAllocation(byteArrayOutputStream, 0, 0);
+        writeCommand(byteArrayOutputStream, 0xAE/*opOutput_Step_Speed*/);
+        writeParameterAsSmallByte(byteArrayOutputStream, 0);
+        writeParameterAsSmallByte(byteArrayOutputStream, getPortByte(port));
+        writeParameterAsByte(byteArrayOutputStream, power);
+        //Записываем, сколько оборотов двигатель будет разгоняться (0 - разгоняться будет моментально).
+        writeParameterAsInteger(byteArrayOutputStream, 0);
+        //Записываем, сколько оборотов двигатель будет крутиться на полной скорости (2,5 оборота, т.е. 900 градусов).
+        writeParameterAsInteger(byteArrayOutputStream, angle);
+        //Записываем, сколько оборотов двигатель будет замедляться (0,5 оборота, т.е. 180 градусов).
+        writeParameterAsInteger(byteArrayOutputStream, 0);
+        //Записываем, нужно ли тормозить в конце (1 - тормозить, 0 - не тормозить).
+        writeParameterAsUByte(byteArrayOutputStream, 1);
+        writeUShort(outputStream, byteArrayOutputStream.size());
+        byteArrayOutputStream.writeTo(outputStream);
+
+    }
+
     private void sendMotorStop(char port) throws IOException {
         ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
         writeUShort(byteArrayOutputStream, 2);
@@ -1239,6 +1261,15 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         }
     }
 
+    private void sendMotorSpeedAngleSync(char port, byte power, int angle) {
+        try {
+            sendMotorSpeedAngle(port, power,angle);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+
     private void readSensorsSync() {
         try {
             lastDistance = readUltrasonicSensor((byte) 0);
@@ -1289,7 +1320,14 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         writeUByte(_stream, 0x81);
         writeByte(_stream, (byte)value);
     }
-
+    //Записывает параметр с типом int.
+    private void writeParameterAsInteger(OutputStream _stream, int value) throws IOException {
+        writeUByte(_stream, 0x83);
+        writeUByte(_stream, value & 0xFF);
+        writeUByte(_stream, (value >> 8) & 0xFF);
+        writeUByte(_stream, (value >> 16) & 0xFF);
+        writeUByte(_stream, (value >> 24) & 0xFF);
+    }
     //Читает unsigned byte.
     private int readUByte(InputStream _stream) throws IOException {
         byte bytes[] = new byte[1];
@@ -1585,15 +1623,22 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
             else if (delta < -127) delta = -127;
             final int delta1 = delta;
             Runnable commandGroup = () -> {
-                // 1. Выполняем команды для моторов
+
                 if (isSTART) {
-                    if (Math.abs(delta1)>1) {
-                        sendMotorSpeedSync('A', (byte) delta1);
+
+                    // Читаем данные сенсоров
+                    if (isFirstRead) {
+                        readSensorsSync();
                     }
-                    else
-                    {
-                        sendMotorStopSync('A');
-                    }
+                    else {
+                        readSensorsSync();
+
+                        // Выполняем команды для моторов
+                        if (Math.abs(delta1) > 1) {
+                            sendMotorSpeedSync('A', (byte) delta1);
+                        } else {
+                            sendMotorStopSync('A');
+                        }
                     /*
                     if (finalAng1 > 0) {
                         sendMotorSpeedSync('B', (byte) (int) (speed * Math.cos(2 * finalAng1)));
@@ -1603,18 +1648,25 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                         sendMotorSpeedSync('C', (byte) (int) (speed * Math.cos(2 * finalAng1)));
                     }
                      */
-                    sendMotorSpeedSync('B', (byte) speed);
-                    sendMotorSpeedSync('C', (byte) speed);
+                        sendMotorSpeedSync('B', (byte) speed);
+                        sendMotorSpeedSync('C', (byte) speed);
+                    }
                 } else if (isFirst) {
+                    sendMotorStopSync('A');
                     sendMotorStopSync('B');
                     sendMotorStopSync('C');
-                    sendMotorStopSync('A');
+                    readSensorsSync();
+                    if (lastEncoderA<0)
+                        sendMotorSpeedAngleSync('A',(byte) 20, -lastEncoderA);
+                    else
+                        sendMotorSpeedAngleSync('A',(byte) -20, lastEncoderA);
+                    //sendMotorStopSync('A');
                     isFirst = false;
                     isFirstRead = true;
                 }
 
-                // 2. Читаем данные сенсоров
-                readSensorsSync();
+
+
             };
 
             // Отправляем группу команд на выполнение
