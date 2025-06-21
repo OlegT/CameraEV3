@@ -37,7 +37,8 @@ public class ContourExtractor {
     private static boolean pointsAreClose(Point p1, Point p2) {
         return Math.abs(p1.x - p2.x) <= 5 && Math.abs(p1.y - p2.y) <= 5;
     }
-    public static List<List<Point>> extractContours(boolean[][] black) {
+    //public static List<List<Point>> extractContours(boolean[][] black) {
+    public static List<Contour> extractContours(boolean[][] black) {
         int height = black.length;
         int width = black[0].length;
         boolean[][] used = new boolean[height][width];
@@ -119,7 +120,12 @@ public class ContourExtractor {
             }
 
         }
-        return contours;
+
+        List<Contour> result = new ArrayList<>();
+        for (List<Point> contour : contours) {
+            result.add(new Contour(contour));
+        }
+        return result;
     }
 
     // Moore-Neighbor tracing + обход через 2 пикселя
@@ -221,13 +227,11 @@ public class ContourExtractor {
         return Math.abs(area) / 2.0;
     }
 
-
-
-    public static List<List<Point>> findConvexQuadrilaterals(List<List<Point>> contours, double epsilon) {
-        List<List<Point>> quads = new ArrayList<>();
-        for (List<Point> contour : contours) {
+    public static List<Contour> findConvexQuadrilaterals(List<Contour> contours, double epsilon) {
+        List<Contour> quads = new ArrayList<>();
+        for (Contour contour : contours) {
             if (contour == null || contour.size() < 3) continue;
-            List<Point> simplified = approxPolyDP(contour, epsilon);
+            List<Point> simplified = approxPolyDP(contour.getPoints(), epsilon);
             simplified = removeClosePoints(simplified, 4);
 
             // Гарантируем замкнутость
@@ -240,7 +244,7 @@ public class ContourExtractor {
                 // Проверяем выпуклость
                 if (isConvex(simplified))
                 {
-                    quads.add(simplified);
+                    quads.add(new Contour(simplified));
                 }
             }
         }

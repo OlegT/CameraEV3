@@ -1567,9 +1567,8 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         }
 
 
-        List<List<Point>> contours = ContourExtractor.extractContours(black);
-        List<List<Point>> contours4 = new ArrayList<>();
-        //contours4 = ContourExtractor.findConvexQuadrilaterals(contours, 4);
+        List<Contour> contours = ContourExtractor.extractContours(black);
+        List<Contour> contours4 = new ArrayList<>();
 
 
         int nColumns = 50; // сколько колонок
@@ -1589,7 +1588,8 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         }
         List<Point> pLineL = findProjectedPoints(points);
         if (!pLineR.isEmpty() && !pLineL.isEmpty()) {
-            contours4.add(new ArrayList<>(Arrays.asList(pLineR.get(0), pLineR.get(1), pLineL.get(1), pLineL.get(0), pLineR.get(0))));
+            List<Point> polyPoints = Arrays.asList(pLineR.get(0), pLineR.get(1), pLineL.get(1), pLineL.get(0));
+            contours4.add(new Contour(polyPoints));
         }
 
 
@@ -1629,6 +1629,8 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                     // Читаем данные сенсоров
                     if (isFirstRead) {
                         readSensorsSync();
+                        sendMotorSpeedSync('B', (byte) speed);
+                        sendMotorSpeedSync('C', (byte) speed);
                     }
                     else {
                         readSensorsSync();
@@ -1648,8 +1650,8 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                         sendMotorSpeedSync('C', (byte) (int) (speed * Math.cos(2 * finalAng1)));
                     }
                      */
-                        sendMotorSpeedSync('B', (byte) speed);
-                        sendMotorSpeedSync('C', (byte) speed);
+                        //sendMotorSpeedSync('B', (byte) speed);
+                        //sendMotorSpeedSync('C', (byte) speed);
                     }
                 } else if (isFirst) {
                     sendMotorStopSync('A');

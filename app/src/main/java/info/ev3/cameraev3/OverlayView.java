@@ -28,8 +28,8 @@ public class OverlayView extends View {
     private Paint bitmapPaint;
     private float fps = 0;
     private Paint fpsPaint;
-    private List<List<Point>> contours = new ArrayList<>();
-    private List<List<Point>> contours4 = new ArrayList<>();
+    private List<Contour> contours = new ArrayList<>();
+    private List<Contour> contours4 = new ArrayList<>();
     private int bitmapWidth, bitmapHeight;
     private Paint contourPaint;
     private Paint contourPaint4;
@@ -99,14 +99,14 @@ public class OverlayView extends View {
         invalidate();
     }
 
-    public void setContours(List<List<Point>> contours, int bitmapWidth, int bitmapHeight) {
+    public void setContours(List<Contour> contours, int bitmapWidth, int bitmapHeight) {
         this.contours = contours;
         this.bitmapWidth = bitmapWidth;
         this.bitmapHeight = bitmapHeight;
         invalidate();
     }
 
-    public void setContours4(List<List<Point>> contours) {
+    public void setContours4(List<Contour> contours) {
         this.contours4 = contours;
         invalidate();
     }
@@ -120,6 +120,7 @@ public class OverlayView extends View {
         this.fps = fps;
         invalidate();
     }
+
     public void setOverlayBitmap(Bitmap bitmap) {
         this.overlayBitmap = bitmap;
     }
@@ -182,19 +183,20 @@ public class OverlayView extends View {
             float scaleX = getWidth() / (float) bitmapHeight;
             float scaleY = getHeight() / (float) bitmapWidth;
 
-            for (List<Point> contour : contours) {
-                if (contour.size() < 2) continue;
+            for (Contour contour : contours) {
+                List<Point> points = contour.getPoints();
+                if (points.size() < 2) continue;
 
                 android.graphics.Path path = new android.graphics.Path();
-                Point first = contour.get(0);
+                Point first = points.get(0);
 
                 float x = (bitmapHeight - first.y) * scaleX;
                 float y = first.x * scaleY;
 
                 path.moveTo(x, y);
 
-                for (int i = 1; i < contour.size(); i++) {
-                    Point p = contour.get(i);
+                for (int i = 1; i < points.size(); i++) {
+                    Point p = points.get(i);
                     x = (bitmapHeight - p.y) * scaleX;
                     y = p.x * scaleY;
 
@@ -209,19 +211,20 @@ public class OverlayView extends View {
             float scaleX = getWidth() / (float) bitmapHeight;
             float scaleY = getHeight() / (float) bitmapWidth;
 
-            for (List<Point> contour : contours4) {
-                if (contour.size() < 2) continue;
+            for (Contour contour : contours4) {
+                List<Point> points = contour.getPoints();
+                if (points.size() < 2) continue;
 
                 android.graphics.Path path = new android.graphics.Path();
-                Point first = contour.get(0);
+                Point first = points.get(0);
 
                 float x = (bitmapHeight - first.y) * scaleX;
                 float y = first.x * scaleY;
 
                 path.moveTo(x, y);
 
-                for (int i = 1; i < contour.size(); i++) {
-                    Point p = contour.get(i);
+                for (int i = 1; i < points.size(); i++) {
+                    Point p = points.get(i);
                     x = (bitmapHeight - p.y) * scaleX;
                     y = p.x * scaleY;
 
