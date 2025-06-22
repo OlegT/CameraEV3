@@ -19,11 +19,12 @@ public class Contour {
     private final Point topmost;
     private final Point bottommost;
     private final Point centroid;
+    private double diffArea;
 
     public Contour(List<Point> points) {
         this.id = -1;
         this.points = new ArrayList<>(points);
-
+        this.diffArea = 1.0;
         // Инициализация граничных точек
         Point l = null, r = null, t = null, b = null;
         double cx = 0, cy = 0;
@@ -79,6 +80,8 @@ public class Contour {
     // Геттеры
     public int getId() { return id; }
     public void setId(int ID) { id = ID; }
+    public double getDiffArea() {  return diffArea; }
+    public void setDiffArea(double diffA) { diffArea = diffA; }
     public List<Point> getPoints() { return new ArrayList<>(points); }
     public int size() {return points.size(); }
     public boolean isClosed() { return isClosed; }

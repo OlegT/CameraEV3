@@ -11,6 +11,7 @@ import android.graphics.Point;
 import android.util.AttributeSet;
 import android.view.View;
 
+import java.text.DecimalFormat;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -152,7 +153,7 @@ public class OverlayView extends View {
         super.onDraw(canvas);
         int w = getWidth();
         int h = getHeight();
-
+        DecimalFormat df = new DecimalFormat("#.####");
         // Отрисовка бинарной маски
         if (overlayBitmap != null) {
             Matrix matrix = new Matrix();
@@ -215,7 +216,8 @@ public class OverlayView extends View {
                 if (centroid != null) {
                     x = (bitmapHeight - centroid.y) * scaleX;
                     y = centroid.x * scaleY;
-                    canvas.drawText("ID: " + contour.getId(), x, y, idPaint);
+                    //canvas.drawText("ID: " + contour.getId() + "("+df.format(contour.getDiffArea())+")", x, y, idPaint);
+                    canvas.drawText(df.format(contour.getDiffArea()), x, y, idPaint);
                 }
             }
         }

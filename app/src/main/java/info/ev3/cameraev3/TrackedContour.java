@@ -85,8 +85,9 @@ public class TrackedContour {
     }
 
     public void update(Contour newContour) {
-        this.contour = newContour;
+        newContour.setDiffArea(newContour.getArea()/this.contour.getArea());
         newContour.setId(id);
+        this.contour = newContour;
         this.lifetime++;
         this.missedFrames = 0;
         calculateBoundaryPoints();

@@ -1562,7 +1562,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         // Шаг 5: Обновляем отображаемые контуры (можно использовать trackedContours)
         List<Contour> displayContours = new ArrayList<>();
         for (TrackedContour track : trackedContours) {
-            if (track.getMissedFrames()<2) displayContours.add(track.getContour());
+            if (track.getMissedFrames()<1 && track.getLifetime()>2) displayContours.add(track.getContour());
         }
         lCol = trackedContours.size();
         // Передаем в OverlayView
