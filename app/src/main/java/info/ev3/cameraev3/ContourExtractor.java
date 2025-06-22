@@ -37,12 +37,12 @@ public class ContourExtractor {
     private static boolean pointsAreClose(Point p1, Point p2) {
         return Math.abs(p1.x - p2.x) <= 5 && Math.abs(p1.y - p2.y) <= 5;
     }
-    //public static List<List<Point>> extractContours(boolean[][] black) {
-    public static List<Contour> extractContours(boolean[][] black) {
+
+    public static List<Contour> extractContours(boolean[][] black, double minArea) {
         int height = black.length;
         int width = black[0].length;
         boolean[][] used = new boolean[height][width];
-        double minArea = width * height * 0.001; // 1% от общей площади
+        //double minArea = width * height * 0.001; // 1% от общей площади
 
         // Список открытых (пока не замкнутых) ломаных
         List<List<Point>> openContours = new ArrayList<>();

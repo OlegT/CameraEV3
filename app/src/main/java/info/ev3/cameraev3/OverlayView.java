@@ -35,6 +35,7 @@ public class OverlayView extends View {
     private Paint contourPaint4;
     private Paint whiteLinePaint;
     private Paint fillPaint;
+    private Paint idPaint;
     private List<WhiteStripe> whiteStripes = new ArrayList<>();
 
     public OverlayView(Context context, AttributeSet attrs) {
@@ -92,6 +93,12 @@ public class OverlayView extends View {
         whiteLinePaint.setColor(0xFF00AA00); // Зеленый цвет
         whiteLinePaint.setStrokeWidth(10);
         whiteLinePaint.setAntiAlias(true);
+
+        // Paint для ID контуров
+        idPaint = new Paint();
+        idPaint.setColor(0xFF8700FF); // Синий цвет
+        idPaint.setTextSize(40);
+        idPaint.setAntiAlias(true);
     }
 
     public void setWhiteStripes(List<WhiteStripe> stripes) {
@@ -203,6 +210,13 @@ public class OverlayView extends View {
                     path.lineTo(x, y);
                 }
                 canvas.drawPath(path, contourPaint);
+
+                Point centroid = contour.getCentroid();
+                if (centroid != null) {
+                    x = (bitmapHeight - centroid.y) * scaleX;
+                    y = centroid.x * scaleY;
+                    canvas.drawText("ID: " + contour.getId(), x, y, idPaint);
+                }
             }
         }
 

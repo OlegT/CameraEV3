@@ -87,7 +87,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
     private static final int REQUEST_ENABLE_BT = 1;
     private static final int REQUEST_BLUETOOTH_PERMISSIONS = 201;
     private static final int BINARIZATION_THRESHOLD = 128;
-
+    private static final double MIN_CONTOUR_AREA = 16.0;
     private static final String PREFS_NAME = "AppSettings";
     private static final String KEY_THRESHOLD = "threshold";
     private static final String KEY_TRANSPARENCY = "transparency";
@@ -183,13 +183,16 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
 
 
     private List<int[]> whiteLines = new ArrayList<>();
-
+    private final List<TrackedContour> trackedContours = new ArrayList<>();
+    private static final int MAX_MISSED_FRAMES = 5;
     private volatile float lastDistance = -1;
     private volatile int lastEncoderA = -1;
     private volatile int lastEncoderA0 = -1;
     private volatile int lastEncoderB = -1;
     private volatile int lastEncoderC = -1;
 
+    int nCol = 0;
+    int lCol = 0;
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -1440,7 +1443,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
     }
 
 
-    public static List<Point> findProjectedPoints(List<Point> points) {
+    public List<Point> findProjectedPoints(List<Point> points) {
         if (points.isEmpty()) {
             return new ArrayList<>();
         }
@@ -1515,6 +1518,57 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         return Arrays.asList(projFirst, projLast);
     }
 
+    private void updateTrackedContours(List<Contour> currentContours) {
+        // Шаг 1: Помечаем все треки как необновленные
+        for (TrackedContour track : trackedContours) {
+            track.markMissed();
+        }
+
+        // Шаг 2: Сопоставляем текущие контуры с существующими треками
+        List<Contour> unmatchedContours = new ArrayList<>(currentContours);
+        //List<TrackedContour> matchedTracks = new ArrayList<>();
+
+        lCol = 0;
+        nCol = currentContours.size();
+        for (Contour contour : currentContours) {
+/*
+            if (!contour.isClosed() || contour.getArea() < MIN_CONTOUR_AREA) {
+                continue;
+            }
+ */
+            //nCol++;
+            for (TrackedContour track : trackedContours) {
+                if (track.isSameContour1(contour)) {
+                    track.update(contour);
+                    //matchedTracks.add(track);
+                    unmatchedContours.remove(contour);
+                    //lCol++;
+                    break;
+                }
+            }
+        }
+
+        // Шаг 3: Создаем новые треки для неопознанных контуров
+        for (Contour contour : unmatchedContours) {
+            if (/*contour.isClosed() && */contour.getArea() >= MIN_CONTOUR_AREA) {
+                trackedContours.add(new TrackedContour(contour));
+            }
+        }
+
+        // Шаг 4: Удаляем старые треки
+        trackedContours.removeIf(track ->
+                track.getMissedFrames() > MAX_MISSED_FRAMES);
+
+        // Шаг 5: Обновляем отображаемые контуры (можно использовать trackedContours)
+        List<Contour> displayContours = new ArrayList<>();
+        for (TrackedContour track : trackedContours) {
+            if (track.getMissedFrames()<2) displayContours.add(track.getContour());
+        }
+        lCol = trackedContours.size();
+        // Передаем в OverlayView
+        overlayView.setContours(displayContours, overlayBitmap.getWidth(), overlayBitmap.getHeight());
+    }
+
 
     @Override public void onSurfaceTextureSizeChanged(@NonNull SurfaceTexture surface, int width, int height) {}
     @Override public boolean onSurfaceTextureDestroyed(@NonNull SurfaceTexture surface) { return false; }
@@ -1567,7 +1621,9 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         }
 
 
-        List<Contour> contours = ContourExtractor.extractContours(black);
+        List<Contour> contours = ContourExtractor.extractContours(black, MIN_CONTOUR_AREA);
+        updateTrackedContours(contours);
+
         List<Contour> contours4 = new ArrayList<>();
 
 
@@ -1682,7 +1738,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
             overlayView.setCenter(viewCenterX, viewCenterY);
             overlayView.setCenterRaw(cX * 176 / 144, cY * 144 / 176);
             overlayView.setOverlayBitmap(overlayBitmap);
-            overlayView.setContours(contours, overlayBitmap.getWidth(), overlayBitmap.getHeight());
+            //overlayView.setContours(contours, overlayBitmap.getWidth(), overlayBitmap.getHeight());
             overlayView.setContours4(contours4);
             //overlayView.setWhiteStripes(whiteStripes);
             overlayView.invalidate();
@@ -1692,7 +1748,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                     "Speed = " + (int) (speed * Math.cos(2 * finalAng))+"\n"+
                     "Dist = " + df.format(lastDistance) + "\n"+
                     "Encoder A = " + lastEncoderA+ "\n"+
-                    "Delta = " + finalDelta
+                    "nCol = " + nCol + "  lCol = " + lCol
             );
         });
     }
