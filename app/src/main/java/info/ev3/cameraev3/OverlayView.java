@@ -32,12 +32,19 @@ public class OverlayView extends View {
     private List<Contour> contours = new ArrayList<>();
     private List<Contour> contours4 = new ArrayList<>();
     private int bitmapWidth, bitmapHeight;
+    private float scaleX, scaleY;
     private Paint contourPaint;
     private Paint contourPaint4;
     private Paint whiteLinePaint;
     private Paint fillPaint;
     private Paint idPaint;
     private List<WhiteStripe> whiteStripes = new ArrayList<>();
+
+    private Point viewPoint(Point p) {
+        int x = (int)((bitmapHeight - p.y) * scaleX);
+        int y = (int)(p.x * scaleY);
+        return new Point(x, y);
+    }
 
     public OverlayView(Context context, AttributeSet attrs) {
         super(context, attrs);
@@ -164,6 +171,9 @@ public class OverlayView extends View {
             canvas.drawBitmap(rotatedBitmap, src, dst, bitmapPaint);
         }
 
+        scaleX = getWidth() / (float) bitmapHeight;
+        scaleY = getHeight() / (float) bitmapWidth;
+
         // Draw lines
         canvas.drawLine(w/2f, 0, w/2f, h, paint);
         //canvas.drawLine(2*w/3f, 0, 2*w/3f, h, paint);
@@ -188,8 +198,6 @@ public class OverlayView extends View {
 
         // Отрисовка контуров
         if (bitmapWidth > 0 && bitmapHeight > 0) {
-            float scaleX = getWidth() / (float) bitmapHeight;
-            float scaleY = getHeight() / (float) bitmapWidth;
 
             for (Contour contour : contours) {
                 List<Point> points = contour.getPoints();
@@ -198,53 +206,38 @@ public class OverlayView extends View {
                 android.graphics.Path path = new android.graphics.Path();
                 Point first = points.get(0);
 
-                float x = (bitmapHeight - first.y) * scaleX;
-                float y = first.x * scaleY;
-
-                path.moveTo(x, y);
+                Point pv = viewPoint(first);
+                path.moveTo(pv.x, pv.y);
 
                 for (int i = 1; i < points.size(); i++) {
-                    Point p = points.get(i);
-                    x = (bitmapHeight - p.y) * scaleX;
-                    y = p.x * scaleY;
-
-                    path.lineTo(x, y);
+                    pv = viewPoint(points.get(i));
+                    path.lineTo(pv.x, pv.y);
                 }
                 canvas.drawPath(path, contourPaint);
 
                 Point centroid = contour.getCentroid();
                 if (centroid != null) {
-                    x = (bitmapHeight - centroid.y) * scaleX;
-                    y = centroid.x * scaleY;
+                    pv = viewPoint(centroid);
                     //canvas.drawText("ID: " + contour.getId() + "("+df.format(contour.getDiffArea())+")", x, y, idPaint);
-                    canvas.drawText(df.format(contour.getDiffArea()), x, y, idPaint);
+                    canvas.drawText(df.format(contour.getDiffArea()), pv.x, pv.y, idPaint);
                 }
             }
         }
 
         // Отрисовка четырехугольников
         if (bitmapWidth > 0 && bitmapHeight > 0) {
-            float scaleX = getWidth() / (float) bitmapHeight;
-            float scaleY = getHeight() / (float) bitmapWidth;
 
             for (Contour contour : contours4) {
                 List<Point> points = contour.getPoints();
                 if (points.size() < 2) continue;
 
                 android.graphics.Path path = new android.graphics.Path();
-                Point first = points.get(0);
-
-                float x = (bitmapHeight - first.y) * scaleX;
-                float y = first.x * scaleY;
-
-                path.moveTo(x, y);
+                Point pv = viewPoint(points.get(0));
+                path.moveTo(pv.x, pv.y);
 
                 for (int i = 1; i < points.size(); i++) {
-                    Point p = points.get(i);
-                    x = (bitmapHeight - p.y) * scaleX;
-                    y = p.x * scaleY;
-
-                    path.lineTo(x, y);
+                    pv = viewPoint(points.get(i));
+                    path.lineTo(pv.x, pv.y);
                 }
                 path.close();
                 canvas.drawPath(path, fillPaint);
@@ -255,14 +248,10 @@ public class OverlayView extends View {
         // Draw white stripes
         if (whiteStripes != null) {
 
-            float scaleX = getWidth() / (float) bitmapHeight;
-            float scaleY = getHeight() / (float) bitmapWidth;
-
             for (WhiteStripe ws : whiteStripes) {
-                float x1 = (bitmapHeight - ws.yStart) * scaleX;
-                float x2 = (bitmapHeight - ws.yEnd) * scaleX;
-                float y = ws.columnX * scaleY;
-                canvas.drawLine(x1, y, x2, y, whiteLinePaint);
+                Point pv1 = viewPoint(new Point(ws.columnX, ws.yStart));
+                Point pv2 = viewPoint(new Point(ws.columnX, ws.yEnd));
+                canvas.drawLine(pv1.x, pv1.y, pv2.x, pv2.y, whiteLinePaint);
             }
         }
 
